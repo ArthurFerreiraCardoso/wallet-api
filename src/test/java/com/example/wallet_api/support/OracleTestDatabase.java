@@ -5,13 +5,14 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.time.Duration;
 
+import org.flywaydb.core.Flyway;
 import org.testcontainers.oracle.OracleContainer;
 import org.testcontainers.utility.DockerImageName;
 import org.testcontainers.utility.MountableFile;
 
 /**
  * Oracle Free compartilhado por todos os testes de integracao da JVM.
- * Mesma imagem e mesmo diretorio db/init do docker-compose.
+ * Mesma imagem, mesmo db/init e mesmas migrations (na mesma ordem) do docker-compose.
  */
 public final class OracleTestDatabase {
 
@@ -21,6 +22,8 @@ public final class OracleTestDatabase {
 
     static {
         CONTAINER.start();
+        migrate(DbUser.AUDIT, "filesystem:db/migration/audit");
+        migrate(DbUser.OWNER, "filesystem:db/migration/owner");
     }
 
     private OracleTestDatabase() {
@@ -32,6 +35,14 @@ public final class OracleTestDatabase {
 
     public static Connection connect(DbUser user) throws SQLException {
         return DriverManager.getConnection(jdbcUrl(), user.username(), user.password());
+    }
+
+    private static void migrate(DbUser user, String location) {
+        Flyway.configure()
+                .dataSource(jdbcUrl(), user.username(), user.password())
+                .locations(location)
+                .load()
+                .migrate();
     }
 
     private static OracleContainer createContainer() {
