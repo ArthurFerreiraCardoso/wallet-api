@@ -19,5 +19,27 @@ services:
       start_period: 30s
       retries: 30
 
+  # Aplica as migrations e termina. O healthcheck da imagem so fica "healthy" depois que db/init terminou,
+  # entao os usuarios ja existem quando o Flyway conecta. Ordem fixa: audit, depois owner.
+  migrate:
+    image: flyway/flyway:12.4.0
+    depends_on:
+      oracle:
+        condition: service_healthy
+    environment:
+      FLYWAY_URL: jdbc:oracle:thin:@//oracle:1521/FREEPDB1
+      WALLET_OWNER_PASSWORD: ${WALLET_OWNER_PASSWORD:?defina WALLET_OWNER_PASSWORD no .env}
+      WALLET_AUDIT_PASSWORD: ${WALLET_AUDIT_PASSWORD:?defina WALLET_AUDIT_PASSWORD no .env}
+    volumes:
+      - ./db/migration:/flyway/migrations:ro
+    entrypoint: ["sh", "-c"]
+    command:
+      - >-
+        FLYWAY_USER=WALLET_AUDIT FLYWAY_PASSWORD="$$WALLET_AUDIT_PASSWORD"
+        flyway -locations=filesystem:/flyway/migrations/audit migrate &&
+        FLYWAY_USER=WALLET_OWNER FLYWAY_PASSWORD="$$WALLET_OWNER_PASSWORD"
+        flyway -locations=filesystem:/flyway/migrations/owner migrate
+    restart: "no"
+
 volumes:
   oracle-data:
