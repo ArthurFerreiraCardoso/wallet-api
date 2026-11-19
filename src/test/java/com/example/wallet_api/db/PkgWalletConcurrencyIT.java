@@ -22,6 +22,8 @@ import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.RepeatedTest;
 
+import com.example.wallet_api.support.DbUser;
+import com.example.wallet_api.support.OracleTestDatabase;
 import com.example.wallet_api.support.PkgWalletCalls.RegisteredTransaction;
 
 /**
@@ -100,6 +102,56 @@ class PkgWalletConcurrencyIT {
             }
             assertThat(running).isEqualByComparingTo(expectedBalance);
         }
+
+        // A trilha de auditoria (lida como WALLET_AUDIT) tem que contar a mesma historia que o extrato.
+        List<Long> ledgerIds;
+        try (Connection check = appConnection()) {
+            ledgerIds = ledgerIdsInOrder(check, walletId);
+        }
+        try (Connection audit = OracleTestDatabase.connect(DbUser.AUDIT)) {
+            List<AuditEntry> trail = auditTrail(audit, walletId);
+            assertThat(trail).as("toda alteracao veio do package").extracting(AuditEntry::source).containsOnly("PKG_WALLET");
+            assertThat(trail).as("cada linha aponta para o lancamento correspondente, na mesma ordem")
+                    .extracting(AuditEntry::transactionId).containsExactlyElementsOf(ledgerIds);
+            BigDecimal previous = BigDecimal.ZERO;
+            for (AuditEntry row : trail) {
+                assertThat(row.before()).as("cada linha comeca onde a anterior terminou").isEqualByComparingTo(previous);
+                previous = row.after();
+            }
+            assertThat(previous).as("ultima linha = saldo final").isEqualByComparingTo(expectedBalance);
+        }
+    }
+
+    private record AuditEntry(String source, Long transactionId, BigDecimal before, BigDecimal after) {
+    }
+
+    private static List<AuditEntry> auditTrail(Connection audit, long walletId) throws SQLException {
+        List<AuditEntry> trail = new ArrayList<>();
+        try (PreparedStatement ps = audit.prepareStatement("""
+                SELECT change_source, transaction_id, balance_before, balance_after
+                  FROM balance_audit WHERE wallet_id = ? ORDER BY id""")) {
+            ps.setLong(1, walletId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    trail.add(new AuditEntry(rs.getString(1), rs.getObject(2, Long.class), rs.getBigDecimal(3), rs.getBigDecimal(4)));
+                }
+            }
+        }
+        return trail;
+    }
+
+    private static List<Long> ledgerIdsInOrder(Connection connection, long walletId) throws SQLException {
+        List<Long> ids = new ArrayList<>();
+        try (PreparedStatement ps = connection.prepareStatement(
+                "SELECT id FROM wallet_owner.v_wallet_transactions WHERE wallet_id = ? ORDER BY id")) {
+            ps.setLong(1, walletId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    ids.add(rs.getLong(1));
+                }
+            }
+        }
+        return ids;
     }
 
     /**
