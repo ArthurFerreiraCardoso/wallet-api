@@ -192,6 +192,46 @@ Exemplo de resposta do extrato:
 Valores monetarios saem sempre com duas casas; datas em UTC, ISO-8601. Carteira inexistente devolve 404 tanto na
 consulta quanto no extrato (e nao uma pagina vazia).
 
+### Escrita
+
+| Metodo e rota | Corpo | Sucesso |
+|---|---|---|
+| `POST /wallets` | `{"holderName": "Maria Silva"}` (opcional, ate 120 caracteres) | `201` + `Location: /wallets/{id}`, carteira com saldo `0.00` |
+| `POST /wallets/{id}/transactions` | `{"type": "CREDIT" ou "DEBIT", "amount": 10.50}` + header `Idempotency-Key` | `201` com o lancamento aplicado |
+
+Idempotencia em `POST /wallets/{id}/transactions`:
+
+- o header `Idempotency-Key` e obrigatorio (1 a 64 caracteres entre letras, numeros, `_` e `-`; diferencia
+  maiusculas). E ele que torna o retry seguro: sem chave, um timeout deixaria o cliente sem saber se a operacao
+  entrou;
+- a chave vale por carteira. Repetir a mesma chave com o mesmo tipo e valor devolve `200`, o **mesmo corpo** da
+  primeira resposta e o header `Idempotent-Replayed: true`; o saldo nao muda de novo;
+- repetir a chave com tipo ou valor diferente devolve `409 IDEMPOTENCY_KEY_CONFLICT`;
+- `503 WALLET_LOCKED` (outra operacao segurou a carteira por mais de 5 s) vem com `Retry-After: 1` e pode ser
+  repetido com a mesma chave sem risco de aplicar duas vezes.
+
+`amount` e numero JSON com no maximo duas casas (`10.005` e recusado, nao arredondado). As regras de valor, tipo e
+chave sao validadas pelo `PKG_WALLET`, nesta ordem: tipo, valor, chave (chave ausente com valor invalido responde
+`INVALID_AMOUNT`). A API recusa antes so o que esta malformado (JSON invalido, campo ausente) e entrada absurda
+(texto enorme, numero com mais de 20 digitos inteiros ou 10 decimais, corpo acima de 16 KB). Nesse ultimo caso a
+resposta e a mesma que o banco daria para a regra: `amount` com 11 casas responde `422 INVALID_AMOUNT`, igual a
+`10.005`.
+
+| Situacao | Status | `code` |
+|---|---|---|
+| debito maior que o saldo | 422 | `INSUFFICIENT_FUNDS` |
+| valor zero, negativo ou com mais de 2 casas | 422 | `INVALID_AMOUNT` |
+| tipo diferente de `CREDIT`/`DEBIT` | 422 | `INVALID_TRANSACTION_TYPE` |
+| chave ausente ou fora do formato | 400 | `INVALID_IDEMPOTENCY_KEY` |
+| mesma chave, operacao diferente | 409 | `IDEMPOTENCY_KEY_CONFLICT` |
+| carteira inexistente | 404 | `WALLET_NOT_FOUND` |
+| `type` ou `amount` ausente | 400 | `VALIDATION_ERROR` (com a lista `errors`) |
+| JSON invalido ou `amount` nao numerico | 400 | `MALFORMED_REQUEST` |
+| corpo acima de 16 KB | 413 | `PAYLOAD_TOO_LARGE` |
+| sem conexao livre no pool (muitas requisicoes esperando o lock de uma carteira) | 503 + `Retry-After` | `SERVICE_BUSY` |
+
+Catalogo completo em [docs/ERROR-CODES.md](docs/ERROR-CODES.md).
+
 ### Formato de erro
 
 Todo erro sai como `application/problem+json` (RFC 9457), com tres campos a mais: `code` (estavel, para o cliente
