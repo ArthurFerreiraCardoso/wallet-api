@@ -15,6 +15,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
 import com.example.wallet_api.api.web.TraceIdFilter;
+import com.example.wallet_api.support.ApiKeyTestSupport;
 import com.example.wallet_api.support.OracleIntegrationTest;
 
 /**
@@ -92,5 +93,20 @@ class PublicEndpointsIT extends OracleIntegrationTest {
     @Test
     void otherActuatorEndpointsAreNotExposed() throws Exception {
         anonymous.perform(get("/actuator/env")).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void metricsRequireTheKey() throws Exception {
+        anonymous.perform(get("/actuator/metrics")).andExpect(status().isUnauthorized());
+    }
+
+    /** Com a chave valida, so health e metrics existem: os endpoints sensiveis nem sao expostos. */
+    @Test
+    void sensitiveActuatorEndpointsAreNotExposedEvenWithTheKey() throws Exception {
+        for (String endpoint : new String[] { "/actuator/env", "/actuator/heapdump", "/actuator/configprops",
+                "/actuator/beans", "/actuator/loggers" }) {
+            anonymous.perform(get(endpoint).header("X-API-Key", ApiKeyTestSupport.API_KEY))
+                    .andExpect(status().isNotFound());
+        }
     }
 }
