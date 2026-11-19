@@ -24,6 +24,7 @@ import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.example.wallet_api.application.WalletCommandService;
 import com.example.wallet_api.application.WalletQueryService;
 import com.example.wallet_api.domain.ErrorCode;
 import com.example.wallet_api.domain.PageRequest;
@@ -48,6 +49,9 @@ class WalletControllerTest {
 
     @MockitoBean
     WalletQueryService service;
+
+    @MockitoBean
+    WalletCommandService commandService;
 
     @Test
     void returnsTheWallet() throws Exception {

@@ -21,12 +21,14 @@ Cada codigo tem uma constante nomeada no package (`c_err_*`). A aplicacao le o c
 
 | Chave na API | Quando acontece | HTTP |
 |---|---|---|
-| `VALIDATION_ERROR` | valor bem formado, mas fora da faixa aceita (ex.: `size=101`, `page=-1`) | 400 |
+| `VALIDATION_ERROR` | parametro fora da faixa aceita (ex.: `size=101`, `page=-1`) ou campo obrigatorio ausente no corpo (com a lista `errors`) | 400 |
 | `INVALID_PERIOD` | `from` igual ou depois de `to`, ou data fora dos anos 0001 a 9999 | 400 |
 | `MALFORMED_REQUEST` | valor que nem da para interpretar (ex.: `size=muitos`, data fora do ISO-8601, JSON invalido) | 400 |
 | `NOT_FOUND` | rota inexistente | 404 |
 | `METHOD_NOT_ALLOWED` | metodo HTTP nao suportado na rota | 405 |
 | `UNSUPPORTED_MEDIA_TYPE` | `Content-Type` diferente de JSON | 415 |
+| `PAYLOAD_TOO_LARGE` | corpo acima de 16 KB | 413 |
+| `SERVICE_BUSY` | nenhuma conexao livre no pool em 5 s (ex.: muitas requisicoes esperando o lock de uma carteira) | 503 + `Retry-After` |
 | `INTERNAL_ERROR` | qualquer erro nao previsto | 500 |
 
 ## Criterio dos status
