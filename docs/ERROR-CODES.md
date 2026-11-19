@@ -1,6 +1,6 @@
 # Catalogo de erros
 
-Erros de negocio nascem no banco, no `PKG_WALLET`, via `RAISE_APPLICATION_ERROR` na faixa `-20001` a `-20010`.
+Erros de negocio nascem no banco, no `PKG_WALLET`, via `RAISE_APPLICATION_ERROR` na faixa `-20001` a `-20010`. As barreiras de entrada absurda da aplicacao (numero com expoente gigante, texto enorme) respondem com os mesmos codigos, sem chegar ao banco.
 Cada codigo tem uma constante nomeada no package (`c_err_*`). A aplicacao le o codigo pelo `SQLException.getErrorCode()`
 (nunca pela mensagem) e traduz para status HTTP e payload padronizado.
 
@@ -39,7 +39,7 @@ Cada codigo tem uma constante nomeada no package (`c_err_*`). A aplicacao le o c
 
 - **400**: a requisicao esta malformada e da para saber sem consultar o estado do sistema (JSON invalido, campo
   ou header obrigatorio ausente, chave fora do formato).
-- **401**: sem API key valida. Vem antes de qualquer outra verificacao.
+- **401**: sem API key valida. Vem antes de qualquer validacao da requisicao, exceto o limite de corpo (413).
 - **404**: o recurso nao existe.
 - **409**: conflito com algo que ja existe (a chave de idempotencia ja foi usada para outra operacao).
 - **422**: a requisicao e bem formada, mas viola uma regra de negocio (valor invalido, saldo insuficiente).
