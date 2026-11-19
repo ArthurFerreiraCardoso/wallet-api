@@ -72,6 +72,19 @@ class AppPrivilegesIT {
     }
 
     @Test
+    void auditSchemaGrantsOnlyExecuteOnItsPackageToTheOwner() throws SQLException {
+        Set<String> grants = new HashSet<>();
+        try (Connection audit = OracleTestDatabase.connect(DbUser.AUDIT);
+             Statement st = audit.createStatement();
+             ResultSet rs = st.executeQuery("SELECT grantee || ':' || table_name || ':' || privilege FROM user_tab_privs_made")) {
+            while (rs.next()) {
+                grants.add(rs.getString(1));
+            }
+        }
+        assertThat(grants).containsExactly("WALLET_OWNER:PKG_BALANCE_AUDIT:EXECUTE");
+    }
+
+    @Test
     void canReadTheViews() throws SQLException {
         try (Statement st = app.createStatement()) {
             st.executeQuery("SELECT COUNT(*) FROM wallet_owner.v_wallets").close();
@@ -98,6 +111,7 @@ class AppPrivilegesIT {
             "SELECT wallet_audit.seq_balance_audit_id.NEXTVAL FROM dual                            | 942",
             "SELECT * FROM wallet_audit.flyway_schema_history                                      | 942",
             "BEGIN wallet_owner.pkg_wallet_context.clear; END;                                     | 6550",
+            "BEGIN wallet_audit.pkg_balance_audit.record_change(1, 'UPDATE', 0, 1, NULL, NULL); END; | 6550",
             "CREATE TABLE app_owned (id NUMBER)                                                    | 1031"
     })
     void cannotWriteOrReachAnythingElse(String sql, int oraCode) {
