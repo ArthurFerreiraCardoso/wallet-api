@@ -9,7 +9,9 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -34,6 +36,26 @@ class SchemaConstraintsIT {
 
     private Connection owner;
     private long walletId;
+
+    /**
+     * Fora destes testes, lancamento so entra pelo PKG_WALLET (trigger de guarda). Aqui o guard e desligado de proposito,
+     * simulando o limite documentado (o owner pode desabilitar triggers): as constraints precisam segurar sozinhas.
+     */
+    @BeforeAll
+    static void disableInsertGuard() throws SQLException {
+        setInsertGuard("DISABLE");
+    }
+
+    @AfterAll
+    static void enableInsertGuard() throws SQLException {
+        setInsertGuard("ENABLE");
+    }
+
+    private static void setInsertGuard(String state) throws SQLException {
+        try (Connection connection = OracleTestDatabase.connect(DbUser.OWNER)) {
+            execute(connection, "ALTER TRIGGER trg_wallet_tx_insert_guard " + state);
+        }
+    }
 
     @BeforeEach
     void setUp() throws SQLException {

@@ -128,6 +128,35 @@ encerre a transacao logo apos um erro. A aplicacao segue isso com um `@Transacti
   ordem em que as operacoes foram aplicadas. Sequences podem ter lacunas (cache, rollback), entao os ids nao sao
   contagem nem indicam horario; o extrato ordena por `(created_at, id)`.
 
+## Triggers: extrato imutavel e trilha de auditoria
+
+| Trigger | Schema | O que garante |
+|---|---|---|
+| `TRG_WALLET_TX_IMMUTABLE` | owner | `UPDATE`/`DELETE`/`MERGE` em `WALLET_TRANSACTIONS` falham com `-20006`, inclusive para o proprio owner |
+| `TRG_WALLET_TX_INSERT_GUARD` | owner | lancamento so entra pelo `PKG_WALLET`: o `INSERT` precisa ter o id que o package publicou no contexto |
+| `TRG_WALLETS_ID_IMMUTABLE` | owner | o id da carteira nao muda (trocar o id moveria o saldo sem deixar trilha) |
+| `TRG_WALLET_TABLES_NO_TRUNCATE` | owner | `TRUNCATE` do extrato e das carteiras falha (trigger de schema; `TRUNCATE` nao dispara trigger de linha) |
+| `TRG_WALLETS_BALANCE_AUDIT` | owner | toda alteracao de saldo em `WALLETS` (insert, update ou delete) grava uma linha na auditoria |
+| `TRG_BALANCE_AUDIT_IMMUTABLE` / `TRG_BALANCE_AUDIT_NO_TRUNCATE` | audit | a propria trilha nao pode ser alterada, apagada nem truncada |
+
+Como a auditoria e gravada:
+
+- o trigger de saldo chama `WALLET_AUDIT.PKG_BALANCE_AUDIT.record_change`. O owner tem `EXECUTE` nesse package, mas
+  `ACCESSIBLE BY` so deixa o trigger chamar: uma chamada ad-hoc numa sessao do owner e recusada, e o owner nao tem
+  `INSERT` na tabela;
+- a operacao causadora vem do `PKG_WALLET_CONTEXT`, preenchido pelo `PKG_WALLET` antes de gravar. Alteracao fora do
+  package fica registrada como `DIRECT_SQL`, com o usuario do banco que a fez;
+- a linha de auditoria entra na mesma transacao da alteracao: se a operacao for desfeita, a auditoria tambem e;
+- nao gera linha o que nao muda saldo: criacao de carteira (saldo 0), replay, operacao recusada.
+
+**Limites conhecidos:** triggers nao protegem contra DDL do dono do schema sobre as proprias tabelas e triggers:
+`ALTER TRIGGER ... DISABLE`, `DROP` ou `CREATE OR REPLACE TRIGGER`, `FLASHBACK TABLE` (que desliga os triggers por
+padrao), alteracao de constraints. Como o `ACCESSIBLE BY` confia no nome do objeto, um trigger redefinido com o
+mesmo nome tambem conseguiria gravar na auditoria. Os triggers de `TRUNCATE` so pegam DDL do proprio dono; um DBA
+com privilegios `ANY` passa direto. Nada disso se resolve com trigger. A mitigacao aqui e de papel: o `WALLET_OWNER` so e usado pelas
+migrations versionadas, a aplicacao nao tem DML nem DDL, e a trilha mora num schema separado, cujo dono nao
+consegue alterar as proprias linhas.
+
 ## Testes
 
 ```bash
@@ -143,5 +172,7 @@ as mesmas migrations do compose (senhas geradas na hora). Precisam apenas do Doc
   espera pelo lock e timeout (`PkgWalletIT`);
 - com 16 sessoes disparando 70 operacoes na mesma carteira ao mesmo tempo (incluindo 10 retries da mesma chave e
   debitos alem do saldo), o saldo final bate com a soma do que foi aplicado, a chave repetida vale uma vez so e,
-  refazendo o extrato lancamento a lancamento, nenhum `balance_after` diverge nem fica negativo
-  (`PkgWalletConcurrencyIT`, repetido 5 vezes por execucao).
+  refazendo o extrato lancamento a lancamento, nenhum `balance_after` diverge nem fica negativo, e a trilha de
+  auditoria conta exatamente a mesma historia (`PkgWalletConcurrencyIT`, repetido 5 vezes por execucao);
+- o extrato e a auditoria nao podem ser alterados nem por SQL direto dos donos, e toda alteracao de saldo,
+  inclusive por SQL direto, aparece na trilha (`ImmutabilityAndAuditIT`).
