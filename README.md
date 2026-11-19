@@ -85,6 +85,49 @@ tem hifen de proposito: se nao forem trocados, o script de init recusa criar os 
 A aplicacao nao le o `.env` inteiro: ela recebe apenas `WALLET_APP_PASSWORD` e `WALLET_DB_URL` por variavel de
 ambiente, para que as senhas do owner, do audit e do SYS nunca cheguem ao processo dela.
 
+## Registro de operacoes: `PKG_WALLET`
+
+Toda escrita passa pelo package `WALLET_OWNER.PKG_WALLET`. O `WALLET_APP` tem `EXECUTE` nele e nada mais de escrita.
+
+| Procedure | O que faz |
+|---|---|
+| `create_wallet(p_holder_name, o_wallet_id, o_balance, o_created_at)` | cria a carteira com saldo `0.00` e id de `SEQ_WALLET_ID` |
+| `register_transaction(p_wallet_id, p_type, p_amount, p_idempotency_key, o_transaction_id, o_balance_after, o_created_at, o_replayed)` | aplica um credito ou debito |
+
+Passo a passo do `register_transaction`:
+
+1. valida tipo, valor (maior que zero, no maximo 2 casas) e formato da chave, antes de tocar em qualquer tabela;
+2. trava a linha da carteira com `SELECT ... FOR UPDATE WAIT 5`;
+3. com o lock na mao, procura a chave na carteira:
+   - se ja existe com o mesmo tipo e valor, devolve o lancamento original (`o_replayed = 'Y'`) sem alterar o saldo;
+   - se existe com tipo ou valor diferente, recusa com `-20005`;
+4. recusa o debito que deixaria o saldo negativo (`-20004`);
+5. grava o lancamento (id de `SEQ_WALLET_TRANSACTION_ID`, com `balance_after`) e atualiza o saldo.
+
+O package nao faz `COMMIT`: quem chama controla a transacao, e o lock da carteira dura ate o commit ou rollback.
+Se qualquer passo falhar, o package volta ao savepoint do inicio da chamada antes de devolver o erro, entao nunca
+sobra lancamento sem o saldo correspondente, mesmo que o chamador capture a excecao e faca commit. Os codigos de
+erro estao em [docs/ERROR-CODES.md](docs/ERROR-CODES.md).
+
+A chave de idempotencia diferencia maiusculas de minusculas e e comparada em binario, independente do NLS da
+sessao (`NLS_COMP`/`NLS_SORT`), igual a constraint `UNIQUE`.
+
+O package pressupoe que o chamador use `READ COMMITTED` (padrao do Oracle), mexa em uma carteira por transacao e
+encerre a transacao logo apos um erro. A aplicacao segue isso com um `@Transactional` curto por operacao.
+
+### Por que isso garante as invariantes sob concorrencia
+
+- **Saldo nunca negativo:** a decisao de aceitar um debito e tomada sobre o saldo lido com a linha travada; nenhuma
+  outra sessao altera aquela carteira entre a leitura e a gravacao. O `CHECK (balance >= 0)` e a segunda barreira.
+- **Nada aplicado em dobro:** a busca pela chave acontece depois do lock, entao duas chamadas com a mesma chave na
+  mesma carteira sao serializadas e a segunda ve o lancamento da primeira. A `UNIQUE (wallet_id, idempotency_key)`
+  e a segunda barreira.
+- **Saldo final consistente:** cada operacao parte do saldo deixado pela anterior. Carteiras diferentes nao
+  disputam o mesmo lock.
+- **Ids em ordem:** o `NEXTVAL` do lancamento e obtido dentro do lock, entao, na mesma carteira, os ids crescem na
+  ordem em que as operacoes foram aplicadas. Sequences podem ter lacunas (cache, rollback), entao os ids nao sao
+  contagem nem indicam horario; o extrato ordena por `(created_at, id)`.
+
 ## Testes
 
 ```bash
@@ -93,5 +136,12 @@ ambiente, para que as senhas do owner, do audit e do SYS nunca cheguem ao proces
 
 Os testes de integracao sobem um Oracle Free proprio via Testcontainers, com a mesma imagem, o mesmo `db/init` e
 as mesmas migrations do compose (senhas geradas na hora). Precisam apenas do Docker rodando; nao dependem do
-`docker compose`. Entre outras coisas, eles provam que o `WALLET_APP` so le as views e nao consegue escrever em
-nenhuma tabela nem enxergar o schema de auditoria.
+`docker compose`. Entre outras coisas, eles provam que:
+
+- o `WALLET_APP` so le as views e nao consegue escrever em nenhuma tabela nem enxergar o schema de auditoria;
+- cada regra do `PKG_WALLET` funciona, incluindo replay, conflito de chave, saldo insuficiente com saldo intacto,
+  espera pelo lock e timeout (`PkgWalletIT`);
+- com 16 sessoes disparando 70 operacoes na mesma carteira ao mesmo tempo (incluindo 10 retries da mesma chave e
+  debitos alem do saldo), o saldo final bate com a soma do que foi aplicado, a chave repetida vale uma vez so e,
+  refazendo o extrato lancamento a lancamento, nenhum `balance_after` diverge nem fica negativo
+  (`PkgWalletConcurrencyIT`, repetido 5 vezes por execucao).
