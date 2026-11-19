@@ -23,18 +23,23 @@ Cada codigo tem uma constante nomeada no package (`c_err_*`). A aplicacao le o c
 |---|---|---|
 | `VALIDATION_ERROR` | parametro fora da faixa aceita (ex.: `size=101`, `page=-1`) ou campo obrigatorio ausente no corpo (com a lista `errors`) | 400 |
 | `INVALID_PERIOD` | `from` igual ou depois de `to`, ou data fora dos anos 0001 a 9999 | 400 |
-| `MALFORMED_REQUEST` | valor que nem da para interpretar (ex.: `size=muitos`, data fora do ISO-8601, JSON invalido) | 400 |
+| `MALFORMED_REQUEST` | valor que nem da para interpretar (ex.: `size=muitos`, id nao numerico na rota, data fora do ISO-8601, JSON invalido) | 400 |
+| `UNAUTHORIZED` | header `X-API-Key` ausente ou com chave errada (mesma resposta nos dois casos; header `WWW-Authenticate: ApiKey header="X-API-Key"`). Sem chave, qualquer rota nao publica responde 401, inclusive as inexistentes | 401 |
+| `FORBIDDEN` | reservado: hoje todo cliente autenticado tem o mesmo acesso, entao nao acontece | 403 |
 | `NOT_FOUND` | rota inexistente | 404 |
 | `METHOD_NOT_ALLOWED` | metodo HTTP nao suportado na rota | 405 |
 | `UNSUPPORTED_MEDIA_TYPE` | `Content-Type` diferente de JSON | 415 |
 | `PAYLOAD_TOO_LARGE` | corpo acima de 16 KB | 413 |
 | `SERVICE_BUSY` | nenhuma conexao livre no pool em 5 s (ex.: muitas requisicoes esperando o lock de uma carteira) | 503 + `Retry-After` |
+| `NOT_ACCEPTABLE` | `Accept` que exclui JSON | 406 |
+| `REQUEST_ERROR` | outro erro 4xx do proprio Spring, sem codigo especifico | 4xx |
 | `INTERNAL_ERROR` | qualquer erro nao previsto | 500 |
 
 ## Criterio dos status
 
 - **400**: a requisicao esta malformada e da para saber sem consultar o estado do sistema (JSON invalido, campo
   ou header obrigatorio ausente, chave fora do formato).
+- **401**: sem API key valida. Vem antes de qualquer outra verificacao.
 - **404**: o recurso nao existe.
 - **409**: conflito com algo que ja existe (a chave de idempotencia ja foi usada para outra operacao).
 - **422**: a requisicao e bem formada, mas viola uma regra de negocio (valor invalido, saldo insuficiente).

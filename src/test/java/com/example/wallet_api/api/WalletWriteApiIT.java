@@ -2,7 +2,6 @@ package com.example.wallet_api.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -16,7 +15,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
@@ -26,7 +24,6 @@ import com.example.wallet_api.support.OracleIntegrationTest;
 /**
  * Escrita de ponta a ponta: HTTP -> service transacional -> PKG_WALLET (como WALLET_APP) -> tradutor de erros.
  */
-@WithMockUser
 class WalletWriteApiIT extends OracleIntegrationTest {
 
     @Autowired
@@ -36,7 +33,7 @@ class WalletWriteApiIT extends OracleIntegrationTest {
 
     @BeforeEach
     void createWallet() throws Exception {
-        MvcResult created = mvc.perform(post("/wallets").with(csrf())
+        MvcResult created = mvc.perform(post("/wallets")
                         .contentType(MediaType.APPLICATION_JSON).content("{\"holderName\":\"  Joao Lima  \"}"))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.holderName").value("Joao Lima"))
@@ -46,7 +43,7 @@ class WalletWriteApiIT extends OracleIntegrationTest {
     }
 
     private ResultActions postTransaction(String key, String type, String amount) throws Exception {
-        var request = post("/wallets/" + walletId + "/transactions").with(csrf())
+        var request = post("/wallets/" + walletId + "/transactions")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"type\":\"%s\",\"amount\":%s}".formatted(type, amount));
         if (key != null) {
@@ -166,7 +163,7 @@ class WalletWriteApiIT extends OracleIntegrationTest {
 
     @Test
     void unknownWalletIs404() throws Exception {
-        ResultActions result = mvc.perform(post("/wallets/-1/transactions").with(csrf())
+        ResultActions result = mvc.perform(post("/wallets/-1/transactions")
                         .header("Idempotency-Key", "k").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"type\":\"CREDIT\",\"amount\":1}"))
                 .andExpect(status().isNotFound())
@@ -176,7 +173,7 @@ class WalletWriteApiIT extends OracleIntegrationTest {
 
     @Test
     void holderLongerThan120CharactersIs422() throws Exception {
-        ResultActions result = mvc.perform(post("/wallets").with(csrf()).contentType(MediaType.APPLICATION_JSON)
+        ResultActions result = mvc.perform(post("/wallets").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"holderName\":\"" + "a".repeat(121) + "\"}"))
                 .andExpect(status().isUnprocessableContent())
                 .andExpect(jsonPath("$.code").value("INVALID_HOLDER"));

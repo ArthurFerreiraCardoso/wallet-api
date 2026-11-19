@@ -23,8 +23,8 @@ public final class ProblemResponses {
 
     public static void write(HttpServletRequest request, HttpServletResponse response, JsonMapper jsonMapper,
                              HttpStatus status, String title, String detail, String code) throws IOException {
+        // Sem "type": como no ProblemDetail do Spring, about:blank fica implicito.
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("type", "about:blank");
         body.put("title", title);
         body.put("status", status.value());
         body.put("detail", detail);
