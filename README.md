@@ -1,10 +1,46 @@
 # wallet-api
 
-Servico de carteira digital (saldo em BRL, creditos e debitos) exposto por HTTP. As regras de consistencia —
-saldo nunca negativo, idempotencia, concorrencia, extrato imutavel e auditoria — ficam no Oracle Database
-(PL/SQL, triggers e sequences). A aplicacao Spring Boot e a camada de API sobre elas.
+Servico de carteira digital (saldo em BRL, creditos e debitos) exposto por HTTP. As regras de consistencia
+(saldo nunca negativo, idempotencia, concorrencia, extrato imutavel e auditoria) ficam no Oracle Database, em
+PL/SQL, triggers e sequences. A aplicacao Spring Boot e a camada de API sobre elas.
 
-> Documentacao em construcao: este README sera completado conforme as partes do projeto forem entrando.
+## Inicio rapido
+
+```bash
+cp .env.example .env          # troque as senhas dos usuarios WALLET_* (os placeholders sao recusados de proposito)
+docker compose up -d          # sobe o Oracle e aplica as migrations; aguarde oracle "healthy" e migrate "Exited (0)"
+./mvnw verify                 # testes unitarios + integracao (sobem um Oracle proprio via Testcontainers)
+```
+
+Os testes nao dependem do compose: eles sobem o proprio Oracle. Com os dois no ar ao mesmo tempo, a maquina precisa
+de memoria para dois bancos; se faltar, rode `docker compose down` antes do `./mvnw verify`.
+
+Para rodar a aplicacao e chamar a API, veja [Rodando a aplicacao](#rodando-a-aplicacao).
+
+## Mapa da documentacao
+
+| Documento | Conteudo |
+|---|---|
+| este README | como subir, rodar e testar; modelo de dados; objetos de banco; API |
+| [DECISIONS.md](DECISIONS.md) | cada decisao tecnica: o que escolhi, por que, o que descartei, o que faria com mais tempo, limitacoes |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | camadas, fluxo de uma operacao, modelo de dados e privilegios, com diagramas |
+| [docs/CONCURRENCY.md](docs/CONCURRENCY.md) | linhas do tempo de operacoes concorrentes: lock, idempotencia, replay, timeout |
+| [docs/ERROR-CODES.md](docs/ERROR-CODES.md) | catalogo de erros: codigo Oracle, chave da API, status HTTP |
+| Swagger UI (`/swagger-ui.html`) | contrato interativo da API |
+
+## Estrategia de concorrencia e idempotencia, em resumo
+
+- **Lock por carteira, no banco:** o `PKG_WALLET` trava a linha da carteira com `SELECT ... FOR UPDATE WAIT 5` antes de
+  qualquer decisao. Operacoes na mesma carteira sao serializadas; carteiras diferentes nao disputam nada.
+- **Idempotencia por carteira:** header `Idempotency-Key` obrigatorio, com `UNIQUE (wallet_id, idempotency_key)`. Com a
+  carteira travada, o package procura a chave: mesmo tipo e valor e replay (mesma resposta, sem aplicar de novo);
+  operacao diferente e conflito (409).
+- **Transacao da aplicacao:** o package nao comita. O `@Transactional` curto da aplicacao comita, e esse commit libera o
+  lock. Em erro, o package volta ao savepoint do inicio da chamada, entao lancamento e saldo andam sempre juntos.
+- **Constraints como segunda barreira:** saldo `>= 0`, valor `> 0` e chave unica valem ate para SQL direto no banco.
+
+Detalhes em [Registro de operacoes](#registro-de-operacoes-pkg_wallet), [docs/CONCURRENCY.md](docs/CONCURRENCY.md) e
+[DECISIONS.md](DECISIONS.md).
 
 ## Pre-requisitos
 
@@ -50,8 +86,8 @@ WALLET_OWNER
   V_WALLETS, V_WALLET_TRANSACTIONS   views WITH READ ONLY; o WALLET_APP tem apenas READ nelas
 
 WALLET_AUDIT
-  BALANCE_AUDIT         wallet_id, dml_operation, balance_before, balance_after, change_source (PKG_WALLET|DIRECT_SQL),
-                        transaction_id, transaction_type, changed_at, db_user
+  BALANCE_AUDIT         id, wallet_id, dml_operation, balance_before, balance_after, change_source (PKG_WALLET|DIRECT_SQL),
+                        transaction_id, transaction_type, changed_at, db_user, os_user, client_module
   SEQ_BALANCE_AUDIT_ID
 ```
 
@@ -80,11 +116,14 @@ chave de idempotencia repetida na mesma carteira.
 | `WALLET_DB_URL` | URL JDBC da aplicacao (padrao `jdbc:oracle:thin:@//localhost:1521/FREEPDB1`) |
 | `WALLET_API_KEY` | chave que os clientes mandam no header `X-API-Key` (minimo 16 caracteres; sem ela a aplicacao nao sobe) |
 
-Senhas: 8 a 30 caracteres, comecando com letra, apenas letras, numeros e `_`. Os valores do `.env.example`
-tem hifen de proposito: se nao forem trocados, o script de init recusa criar os usuarios.
+Senhas dos usuarios `WALLET_*`: 8 a 30 caracteres, comecando com letra, apenas letras, numeros e `_`. Os valores do
+`.env.example` tem hifen de proposito: se nao forem trocados, o script de init recusa criar os usuarios. A
+`ORACLE_PASSWORD` (SYS) e validada pela propria imagem do Oracle; troque-a tambem.
 
-A aplicacao nao le o `.env` inteiro: ela recebe apenas `WALLET_APP_PASSWORD`, `WALLET_DB_URL` e `WALLET_API_KEY`
-por variavel de ambiente, para que as senhas do owner, do audit e do SYS nunca cheguem ao processo dela.
+**Quem le o `.env`:** so o `docker compose`. A aplicacao **nao** le o arquivo; ela recebe `WALLET_APP_PASSWORD`,
+`WALLET_DB_URL` e `WALLET_API_KEY` por variavel de ambiente do shell (veja [Rodando a aplicacao](#rodando-a-aplicacao)).
+Assim as senhas do owner, do audit e do SYS nunca chegam ao processo dela. `WALLET_DB_URL` e `WALLET_API_KEY` estao no
+`.env.example` so como referencia.
 
 ## Rodando a aplicacao
 
@@ -100,7 +139,8 @@ export WALLET_API_KEY="$(openssl rand -hex 24)"
 ```powershell
 # Windows PowerShell
 $env:WALLET_APP_PASSWORD = '<mesma senha do .env>'
-$env:WALLET_API_KEY = -join ((48..57) + (97..102) | Get-Random -Count 32 | ForEach-Object { [char]$_ })
+$bytes = New-Object byte[] 24; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+$env:WALLET_API_KEY = -join ($bytes | ForEach-Object { $_.ToString('x2') })
 .\mvnw.cmd spring-boot:run
 ```
 
@@ -145,11 +185,12 @@ Toda escrita passa pelo package `WALLET_OWNER.PKG_WALLET`. O `WALLET_APP` tem `E
 Passo a passo do `register_transaction`:
 
 1. valida tipo, valor (maior que zero, no maximo 2 casas) e formato da chave, antes de tocar em qualquer tabela;
-2. trava a linha da carteira com `SELECT ... FOR UPDATE WAIT 5`;
+2. trava a linha da carteira com `SELECT ... FOR UPDATE WAIT 5` (carteira inexistente: `-20001`; lock nao obtido em
+   5 s: `-20007`);
 3. com o lock na mao, procura a chave na carteira:
    - se ja existe com o mesmo tipo e valor, devolve o lancamento original (`o_replayed = 'Y'`) sem alterar o saldo;
    - se existe com tipo ou valor diferente, recusa com `-20005`;
-4. recusa o debito que deixaria o saldo negativo (`-20004`);
+4. recusa o debito que deixaria o saldo negativo (`-20004`) e o credito que passaria do saldo maximo (`-20010`);
 5. grava o lancamento (id de `SEQ_WALLET_TRANSACTION_ID`, com `balance_after`) e atualiza o saldo.
 
 O package nao faz `COMMIT`: quem chama controla a transacao, e o lock da carteira dura ate o commit ou rollback.
@@ -269,10 +310,10 @@ Idempotencia em `POST /wallets/{id}/transactions`:
 
 `amount` e numero JSON com no maximo duas casas (`10.005` e recusado, nao arredondado). As regras de valor, tipo e
 chave sao validadas pelo `PKG_WALLET`, nesta ordem: tipo, valor, chave (chave ausente com valor invalido responde
-`INVALID_AMOUNT`). A API recusa antes so o que esta malformado (JSON invalido, campo ausente) e entrada absurda
-(texto enorme, numero com mais de 20 digitos inteiros ou 10 decimais, corpo acima de 16 KB). Nesse ultimo caso a
-resposta e a mesma que o banco daria para a regra: `amount` com 11 casas responde `422 INVALID_AMOUNT`, igual a
-`10.005`.
+`INVALID_AMOUNT`). A API recusa antes so o que esta malformado (JSON invalido, campo ausente) e entrada absurda.
+Corpo acima de 16 KB responde `413`. Para numero ou texto absurdo (mais de 20 digitos inteiros ou 10 decimais,
+texto com mais de 1000 caracteres), a resposta e a mesma que o banco daria para a regra: `amount` com 11 casas
+responde `422 INVALID_AMOUNT`, igual a `10.005`.
 
 | Situacao | Status | `code` |
 |---|---|---|
@@ -319,14 +360,14 @@ as mesmas migrations do compose (senhas geradas na hora). Precisam apenas do Doc
 - o `WALLET_APP` so le as views e nao consegue escrever em nenhuma tabela nem enxergar o schema de auditoria;
 - cada regra do `PKG_WALLET` funciona, incluindo replay, conflito de chave, saldo insuficiente com saldo intacto,
   espera pelo lock e timeout (`PkgWalletIT`);
-- com 16 sessoes disparando 70 operacoes na mesma carteira ao mesmo tempo (incluindo 10 retries da mesma chave e
+- com 16 sessoes disparando 70 operacoes na mesma carteira ao mesmo tempo (incluindo 10 copias da mesma chave e
   debitos alem do saldo), o saldo final bate com a soma do que foi aplicado, a chave repetida vale uma vez so e,
   refazendo o extrato lancamento a lancamento, nenhum `balance_after` diverge nem fica negativo, e a trilha de
   auditoria conta exatamente a mesma historia (`PkgWalletConcurrencyIT`, repetido 5 vezes por execucao);
 - o extrato e a auditoria nao podem ser alterados nem por SQL direto dos donos, e toda alteracao de saldo,
   inclusive por SQL direto, aparece na trilha (`ImmutabilityAndAuditIT`);
 - a mesma garantia vale de ponta a ponta pela API: 16 clientes HTTP de verdade contra o servidor real disparam 62
-  operacoes na mesma carteira (12 copias simultaneas da mesma `Idempotency-Key`, debitos alem do saldo), repetindo
+  operacoes na mesma carteira (12 copias da mesma `Idempotency-Key` disparadas junto com as demais, debitos alem do saldo), repetindo
   com a mesma chave quando recebem 503. Exatamente uma copia e aplicada e as outras onze recebem o mesmo corpo;
   cada resposta e igual ao lancamento gravado; saldo, extrato completo e trilha de auditoria contam a mesma
   historia; e o retry tardio de um debito aplicado continua sendo replay mesmo com o saldo zerado
@@ -342,3 +383,35 @@ Rodar so os testes de concorrencia:
 ```bash
 ./mvnw verify -Dit.test='PkgWalletConcurrencyIT,ApiConcurrencyIT'
 ```
+
+O CI (GitHub Actions) roda `./mvnw verify` completo a cada push na `main` e em todo pull request para a `main`.
+
+## Estrutura do repositorio
+
+```
+db/init/                   script de criacao dos usuarios (roda como SYS na 1a inicializacao do container)
+db/migration/audit/        migrations do schema WALLET_AUDIT (Flyway, como WALLET_AUDIT)
+db/migration/owner/        migrations do schema WALLET_OWNER: tabelas, views, PKG_WALLET, triggers, grants
+docs/                      arquitetura, concorrencia e catalogo de erros
+src/main/java/.../api/              HTTP: controller, DTOs, erros, filtros, seguranca, OpenAPI
+src/main/java/.../application/      casos de uso (transacao curta na escrita)
+src/main/java/.../domain/           modelo, catalogo de erros e portas
+src/main/java/.../infrastructure/   adaptadores Oracle (package, views) e tradutor de erros
+src/test/java/.../db/               testes do banco: privilegios, constraints, package, triggers, concorrencia
+src/test/java/.../api/              testes da API: contrato, seguranca, leitura, escrita, concorrencia via HTTP
+docker-compose.yml         Oracle Free + servico de migrations
+.env.example               variaveis de ambiente (copie para .env)
+```
+
+## Troubleshooting
+
+| Sintoma | Causa provavel e solucao |
+|---|---|
+| Container `oracle` reinicia ou nunca fica `healthy` | Pouca memoria para o Docker. Garanta pelo menos 4 GB (Docker Desktop > Settings > Resources). Com menos de 2 GB o Oracle nao inicializa. |
+| Log do `oracle` com `01-create-users: ... deve ter 8-30 caracteres` | Senhas do `.env` ainda com os placeholders ou fora do formato (letras, numeros e `_`, comecando com letra). Corrija e recrie o volume: `docker compose down -v && docker compose up -d`. |
+| Mudei senhas no `.env` e nada mudou | O script de init so roda com o volume vazio. Recrie: `docker compose down -v && docker compose up -d` (apaga os dados). |
+| `migrate` termina com erro | Veja `docker compose logs migrate`. Se o banco foi recriado com outras senhas, o `.env` e o volume precisam estar alinhados (`down -v`). |
+| `port is already allocated` na porta 1521 | Outro Oracle local. Mude `ORACLE_PORT` no `.env` e exporte `WALLET_DB_URL` com a mesma porta antes de rodar a aplicacao (ela nao le o `.env`). |
+| `bad interpreter` ou `\r: command not found` no init (Windows) | O script foi salvo com CRLF. O `.gitattributes` forca LF em `*.sh`; se o arquivo foi editado ou copiado por fora do git, converta para LF ou clone o repositorio de novo. |
+| Aplicacao nao sobe: `apiKey` invalida | `WALLET_API_KEY` ausente, com menos de 16 caracteres ou com o placeholder. Gere uma: `openssl rand -hex 24`. |
+| `./mvnw verify` falha nos testes de integracao com erro de Docker | O Docker precisa estar rodando; os testes sobem o proprio Oracle (a primeira execucao baixa a imagem, cerca de 1,3 GB). |
