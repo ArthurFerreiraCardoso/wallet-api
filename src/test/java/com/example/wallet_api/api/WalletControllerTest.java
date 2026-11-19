@@ -20,7 +20,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
-import org.springframework.security.test.context.support.WithMockUser;
+import com.example.wallet_api.support.WebLayerTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -39,8 +39,7 @@ import com.example.wallet_api.domain.WalletTransaction;
  * Contrato HTTP de leitura e formato padronizado dos erros, com o service mockado.
  */
 @WebMvcTest(WalletController.class)
-@WithMockUser
-class WalletControllerTest {
+class WalletControllerTest extends WebLayerTest {
 
     private static final Instant CREATED = Instant.parse("2026-11-19T13:00:00Z");
 

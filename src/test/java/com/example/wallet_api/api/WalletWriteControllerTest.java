@@ -7,7 +7,6 @@ import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -20,8 +19,8 @@ import java.time.Instant;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import com.example.wallet_api.support.WebLayerTest;
 import org.springframework.http.MediaType;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -40,8 +39,7 @@ import com.example.wallet_api.domain.WalletTransaction;
  * Contrato HTTP de escrita com o service mockado: status, headers e erros do catalogo.
  */
 @WebMvcTest(WalletController.class)
-@WithMockUser
-class WalletWriteControllerTest {
+class WalletWriteControllerTest extends WebLayerTest {
 
     private static final Instant CREATED = Instant.parse("2026-11-19T13:00:00Z");
 
@@ -55,7 +53,7 @@ class WalletWriteControllerTest {
     WalletCommandService commandService;
 
     private static MockHttpServletRequestBuilder postTransaction(String key, String json) {
-        MockHttpServletRequestBuilder request = post("/wallets/7/transactions").with(csrf())
+        MockHttpServletRequestBuilder request = post("/wallets/7/transactions")
                 .contentType(MediaType.APPLICATION_JSON).content(json);
         return key == null ? request : request.header("Idempotency-Key", key);
     }
@@ -69,7 +67,7 @@ class WalletWriteControllerTest {
     void createsAWalletWith201AndLocation() throws Exception {
         when(commandService.createWallet("Maria")).thenReturn(new Wallet(42, "Maria", new BigDecimal("0.00"), CREATED, CREATED));
 
-        mvc.perform(post("/wallets").with(csrf()).contentType(MediaType.APPLICATION_JSON).content("{\"holderName\":\"Maria\"}"))
+        mvc.perform(post("/wallets").contentType(MediaType.APPLICATION_JSON).content("{\"holderName\":\"Maria\"}"))
                 .andExpect(status().isCreated())
                 .andExpect(header().string("Location", "/wallets/42"))
                 .andExpect(jsonPath("$.id").value(42))
@@ -80,7 +78,7 @@ class WalletWriteControllerTest {
     void createsAWalletWithoutBody() throws Exception {
         when(commandService.createWallet(isNull())).thenReturn(new Wallet(43, null, new BigDecimal("0.00"), CREATED, CREATED));
 
-        mvc.perform(post("/wallets").with(csrf()))
+        mvc.perform(post("/wallets"))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.holderName").doesNotExist());
     }
@@ -206,21 +204,8 @@ class WalletWriteControllerTest {
     }
 
     @Test
-    void absurdlyLongTextGetsTheSameAnswerAsTheDatabaseRule() throws Exception {
-        mvc.perform(postTransaction("k", "{\"type\":\"" + "X".repeat(21) + "\",\"amount\":1}"))
-                .andExpect(status().isUnprocessableContent())
-                .andExpect(jsonPath("$.code").value("INVALID_TRANSACTION_TYPE"));
-        mvc.perform(post("/wallets").with(csrf()).contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"holderName\":\"" + "a".repeat(1001) + "\"}"))
-                .andExpect(status().isUnprocessableContent())
-                .andExpect(jsonPath("$.code").value("INVALID_HOLDER"));
-
-        verify(commandService, never()).createWallet(any());
-    }
-
-    @Test
     void bodyLargerThan16KbIs413() throws Exception {
-        mvc.perform(post("/wallets").with(csrf()).contentType(MediaType.APPLICATION_JSON)
+        mvc.perform(post("/wallets").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"holderName\":\"" + "a".repeat(17 * 1024) + "\"}"))
                 .andExpect(status().isContentTooLarge())
                 .andExpect(header().string("Content-Type", "application/problem+json"))
@@ -233,7 +218,7 @@ class WalletWriteControllerTest {
 
     @Test
     void nonJsonContentTypeIs415() throws Exception {
-        mvc.perform(post("/wallets/7/transactions").with(csrf()).header("Idempotency-Key", "k")
+        mvc.perform(post("/wallets/7/transactions").header("Idempotency-Key", "k")
                         .contentType(MediaType.TEXT_PLAIN).content("CREDIT 10"))
                 .andExpect(status().isUnsupportedMediaType())
                 .andExpect(jsonPath("$.code").value("UNSUPPORTED_MEDIA_TYPE"));

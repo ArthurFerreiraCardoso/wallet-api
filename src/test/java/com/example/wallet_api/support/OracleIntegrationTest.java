@@ -2,16 +2,19 @@ package com.example.wallet_api.support;
 
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.context.annotation.Import;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
 /**
- * Base para testes de integracao com contexto Spring: a aplicacao conecta como WALLET_APP, igual em producao.
+ * Base para testes de integracao com contexto Spring: a aplicacao conecta como WALLET_APP, igual em producao,
+ * e as requisicoes do MockMvc levam a API key de teste.
  * Configuracao unica para que todas as classes reaproveitem o mesmo contexto (e o mesmo pool de conexoes).
  * O pool e pequeno porque o Oracle Free tem poucas sessoes e outros testes abrem conexoes proprias.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
+@Import(ApiKeyTestSupport.class)
 public abstract class OracleIntegrationTest {
 
     @DynamicPropertySource
@@ -21,5 +24,6 @@ public abstract class OracleIntegrationTest {
         registry.add("spring.datasource.password", DbUser.APP::password);
         registry.add("spring.datasource.hikari.maximum-pool-size", () -> "4");
         registry.add("spring.datasource.hikari.minimum-idle", () -> "1");
+        ApiKeyTestSupport.register(registry);
     }
 }
