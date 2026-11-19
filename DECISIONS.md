@@ -465,7 +465,11 @@ especifico do Oracle.
 pelo lock que passava com ou sem lock, e a primeira versao do teste concorrente via HTTP, em que a chave repetida
 podia chegar sempre com saldo zerado e nada era testado. Os dois foram reescritos.
 
-**Com mais tempo.** Teste de carga com k6, mutation testing automatizado (PIT) na camada Java e um job de CI
+**Teste de carga.** Alem dos testes de integracao, um teste com k6 (`load-test/`) dispara 2000 operacoes na mesma
+carteira com 50 usuarios virtuais e confere saldo, extrato e auditoria contra operacoes conhecidas de antemao. Rodei-o
+tambem contra o package sem o `FOR UPDATE`, e ele falhou.
+
+**Com mais tempo.** Mutation testing automatizado (PIT) na camada Java, o teste de carga rodando no CI e um job de CI
 que rode os testes de concorrencia varias vezes seguidas para medir instabilidade.
 
 ## 21. Ambiente Docker
