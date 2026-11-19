@@ -30,6 +30,7 @@ Com o compose e os testes no ar ao mesmo tempo, a maquina precisa de memoria par
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | camadas, fluxo de uma operacao, modelo de dados e privilegios, com diagramas |
 | [docs/CONCURRENCY.md](docs/CONCURRENCY.md) | linhas do tempo de operacoes concorrentes: lock, idempotencia, replay, timeout |
 | [docs/ERROR-CODES.md](docs/ERROR-CODES.md) | catalogo de erros: codigo Oracle, chave da API, status HTTP |
+| [load-test/](load-test/README.md) | teste de carga com k6: 2000 operacoes concorrentes na mesma carteira, conferencia de saldo, extrato e auditoria, e o [resultado](load-test/RESULTS.md) |
 | Swagger UI (`/swagger-ui.html`) | contrato interativo da API |
 
 ## Estrategia de concorrencia e idempotencia, em resumo
@@ -418,6 +419,14 @@ Rodar so os testes de concorrencia:
 
 O CI (GitHub Actions) roda `./mvnw verify` completo a cada push na `main` e em todo pull request para a `main`.
 
+### Teste de carga
+
+Com a stack do compose no ar, `docker compose --profile load run --rm k6` dispara 2000 operacoes concorrentes na mesma
+carteira (50 usuarios virtuais, sem instalar o k6) e confere no fim que saldo e extrato batem exatamente com o esperado;
+`bash load-test/verify-audit.sh <id>` confere a trilha de auditoria. Nas execucoes de referencia: entre 250 e 320 req/s,
+todas disputando o lock da mesma carteira, zero inconsistencias. Detalhes em [load-test/README.md](load-test/README.md)
+e numeros em [load-test/RESULTS.md](load-test/RESULTS.md).
+
 ## Estrutura do repositorio
 
 ```
@@ -425,6 +434,7 @@ db/init/                   script de criacao dos usuarios (roda como SYS na 1a i
 db/migration/audit/        migrations do schema WALLET_AUDIT (Flyway, como WALLET_AUDIT)
 db/migration/owner/        migrations do schema WALLET_OWNER: tabelas, views, PKG_WALLET, triggers, grants
 docs/                      arquitetura, concorrencia e catalogo de erros
+load-test/                 teste de carga (k6) e verificacao da trilha de auditoria
 src/main/java/.../api/              HTTP: controller, DTOs, erros, filtros, seguranca, OpenAPI
 src/main/java/.../application/      casos de uso (transacao curta na escrita)
 src/main/java/.../domain/           modelo, catalogo de erros e portas

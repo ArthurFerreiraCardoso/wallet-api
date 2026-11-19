@@ -70,5 +70,20 @@ services:
       - no-new-privileges:true
     restart: "no"
 
+  # Teste de carga (so roda sob demanda: docker compose --profile load run --rm k6). Ver load-test/README.md.
+  k6:
+    image: grafana/k6:1.8.3
+    profiles: ["load"]
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      BASE_URL: http://app:8080
+      K6_NO_USAGE_REPORT: "true"
+      WALLET_API_KEY: ${WALLET_API_KEY:?defina WALLET_API_KEY no .env}
+    volumes:
+      - ./load-test:/scripts:ro
+    command: ["run", "/scripts/wallet-load.js"]
+
 volumes:
   oracle-data:
