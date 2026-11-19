@@ -100,20 +100,17 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     /**
      * Campo obrigatorio ausente: 400 VALIDATION_ERROR com a lista de campos.
-     * As demais anotacoes dos DTOs sao so barreiras contra entrada absurda; quando uma delas dispara, a resposta e
-     * a mesma que o banco daria para aquela regra (ex.: amount com 11 casas -> 422 INVALID_AMOUNT, igual a 10.005).
+     * O {@code @Digits} de amount e so uma barreira contra numero absurdo; quando ele dispara, a resposta e a mesma
+     * que o banco daria (ex.: amount com 11 casas -> 422 INVALID_AMOUNT, igual a 10.005).
      */
     @Override
     protected ResponseEntity<Object> handleMethodArgumentNotValid(MethodArgumentNotValidException ex, HttpHeaders headers,
                                                                   HttpStatusCode status, WebRequest request) {
         List<FieldError> fieldErrors = ex.getBindingResult().getFieldErrors();
         boolean missingField = fieldErrors.stream().anyMatch(GlobalExceptionHandler::isPresenceError);
-        if (!missingField && !fieldErrors.isEmpty()) {
-            ErrorCode code = businessCodeFor(fieldErrors.getFirst().getField());
-            if (code != null) {
-                ResponseEntity<ProblemDetail> response = walletError(code, code.defaultMessage(), ex);
-                return ResponseEntity.status(response.getStatusCode()).headers(response.getHeaders()).body(response.getBody());
-            }
+        if (!missingField && !fieldErrors.isEmpty() && "amount".equals(fieldErrors.getFirst().getField())) {
+            ResponseEntity<ProblemDetail> response = walletError(ErrorCode.INVALID_AMOUNT, ErrorCode.INVALID_AMOUNT.defaultMessage(), ex);
+            return ResponseEntity.status(response.getStatusCode()).headers(response.getHeaders()).body(response.getBody());
         }
         List<Map<String, String>> errors = fieldErrors.stream()
                 .map(error -> Map.of("field", error.getField(), "message", isPresenceError(error) ? "obrigatorio" : "invalido"))
@@ -129,14 +126,6 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return "NotNull".equals(error.getCode()) || "NotBlank".equals(error.getCode());
     }
 
-    private static ErrorCode businessCodeFor(String field) {
-        return switch (field) {
-            case "amount" -> ErrorCode.INVALID_AMOUNT;
-            case "type" -> ErrorCode.INVALID_TRANSACTION_TYPE;
-            case "holderName" -> ErrorCode.INVALID_HOLDER;
-            default -> null;
-        };
-    }
 
     private static ProblemDetail enrich(ProblemDetail problem, String code) {
         problem.setProperty("code", code);

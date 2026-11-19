@@ -14,6 +14,7 @@ import org.springframework.jdbc.core.CallableStatementCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+import com.example.wallet_api.domain.ErrorCode;
 import com.example.wallet_api.domain.RegisteredTransaction;
 import com.example.wallet_api.domain.TransactionType;
 import com.example.wallet_api.domain.WalletException;
@@ -39,8 +40,15 @@ class PkgWalletAdapter implements WalletCommandPort {
         this.errorTranslator = errorTranslator;
     }
 
+    /**
+     * Texto acima disso nem chega ao driver: um VARCHAR2 de PL/SQL aceita ate 32767 bytes, e alem disso o erro seria
+     * do driver (500) e nao a regra do catalogo. Bem acima dos limites reais (120 no titular, 64 na chave).
+     */
+    static final int MAX_TEXT_PARAMETER = 1000;
+
     @Override
     public long createWallet(String holderName) {
+        rejectIfAbsurd(holderName, ErrorCode.INVALID_HOLDER);
         return call(CREATE_WALLET, (CallableStatementCallback<Long>) cs -> {
             cs.setString(1, holderName);
             cs.registerOutParameter(2, Types.NUMERIC);
@@ -53,6 +61,8 @@ class PkgWalletAdapter implements WalletCommandPort {
 
     @Override
     public RegisteredTransaction registerTransaction(long walletId, String type, BigDecimal amount, String idempotencyKey) {
+        rejectIfAbsurd(type, ErrorCode.INVALID_TRANSACTION_TYPE);
+        rejectIfAbsurd(idempotencyKey, ErrorCode.INVALID_IDEMPOTENCY_KEY);
         return call(REGISTER_TRANSACTION, (CallableStatementCallback<RegisteredTransaction>) cs -> {
             cs.setLong(1, walletId);
             cs.setString(2, type);
@@ -81,6 +91,12 @@ class PkgWalletAdapter implements WalletCommandPort {
                 idempotencyKey,
                 createdAt.toInstant(ZoneOffset.UTC));
         return new RegisteredTransaction(transaction, "Y".equals(cs.getString(8)));
+    }
+
+    private static void rejectIfAbsurd(String value, ErrorCode code) {
+        if (value != null && value.length() > MAX_TEXT_PARAMETER) {
+            throw new WalletException(code, code.defaultMessage());
+        }
     }
 
     private <T> T call(String sql, CallableStatementCallback<T> callback) {
