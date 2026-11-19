@@ -43,6 +43,22 @@ BEGIN
 END;
 /
 
+-- Por padrao o Oracle concede INHERIT PRIVILEGES de todo usuario novo a PUBLIC: codigo invoker rights de outro
+-- schema chamado por estes usuarios executaria com os privilegios deles. Revogado para os tres.
+DECLARE
+  e_not_granted EXCEPTION;
+  PRAGMA EXCEPTION_INIT(e_not_granted, -1927);
+BEGIN
+  FOR u IN (SELECT username FROM dba_users WHERE username IN ('WALLET_OWNER', 'WALLET_APP', 'WALLET_AUDIT')) LOOP
+    BEGIN
+      EXECUTE IMMEDIATE 'REVOKE INHERIT PRIVILEGES ON USER ' || u.username || ' FROM PUBLIC';
+    EXCEPTION
+      WHEN e_not_granted THEN NULL;
+    END;
+  END LOOP;
+END;
+/
+
 -- Dono da trilha de auditoria: so cria os proprios objetos.
 GRANT CREATE SESSION, CREATE TABLE, CREATE SEQUENCE, CREATE PROCEDURE, CREATE TRIGGER TO WALLET_AUDIT;
 
