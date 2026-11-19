@@ -4,6 +4,7 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.time.Duration;
+import java.util.Set;
 
 import org.flywaydb.core.Flyway;
 import org.testcontainers.oracle.OracleContainer;
@@ -17,6 +18,10 @@ import org.testcontainers.utility.MountableFile;
 public final class OracleTestDatabase {
 
     private static final int ORACLE_PORT = 1521;
+
+    private static final Set<Integer> LISTENER_BUSY_CODES = Set.of(12516, 12519, 12520);
+
+    private static final Duration LISTENER_RETRY_WINDOW = Duration.ofSeconds(30);
 
     private static final OracleContainer CONTAINER = createContainer();
 
@@ -33,8 +38,35 @@ public final class OracleTestDatabase {
         return "jdbc:oracle:thin:@//%s:%d/FREEPDB1".formatted(CONTAINER.getHost(), CONTAINER.getMappedPort(ORACLE_PORT));
     }
 
+    /**
+     * Abre uma conexao dedicada, repetindo quando o listener recusa por excesso de carga estimada.
+     * O listener conta as conexoes que abriu desde a ultima atualizacao enviada pela instancia; numa rajada de
+     * abre-e-fecha (testes de concorrencia em rodadas) essa estimativa passa do limite com poucas sessoes vivas e ele
+     * responde ORA-12516/12519/12520 ate a proxima atualizacao, alguns segundos depois.
+     */
     public static Connection connect(DbUser user) throws SQLException {
-        return DriverManager.getConnection(jdbcUrl(), user.username(), user.password());
+        long deadline = System.nanoTime() + LISTENER_RETRY_WINDOW.toNanos();
+        long backoffMillis = 200;
+        while (true) {
+            try {
+                return DriverManager.getConnection(jdbcUrl(), user.username(), user.password());
+            } catch (SQLException e) {
+                if (!LISTENER_BUSY_CODES.contains(e.getErrorCode()) || System.nanoTime() > deadline) {
+                    throw e;
+                }
+                sleep(backoffMillis);
+                backoffMillis = Math.min(backoffMillis * 2, 2000);
+            }
+        }
+    }
+
+    private static void sleep(long millis) throws SQLException {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new SQLException("Interrompido aguardando o listener", e);
+        }
     }
 
     private static void migrate(DbUser user, String location) {
