@@ -4,6 +4,11 @@ Servico de carteira digital (saldo em BRL, creditos e debitos) exposto por HTTP.
 (saldo nunca negativo, idempotencia, concorrencia, extrato imutavel e auditoria) ficam no Oracle Database, em
 PL/SQL, triggers e sequences. A aplicacao Spring Boot e a camada de API sobre elas.
 
+
+<img width="1883" height="846" alt="AdobeExpressPhotos_1fcf3a7437f84392bf26c43b94316b87_CopyEdited" src="https://github.com/user-attachments/assets/b0da3dfd-90bd-4d78-a46c-fc61e415d797" />
+
+
+
 ## Inicio rapido
 
 ```bash
