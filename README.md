@@ -324,4 +324,21 @@ as mesmas migrations do compose (senhas geradas na hora). Precisam apenas do Doc
   refazendo o extrato lancamento a lancamento, nenhum `balance_after` diverge nem fica negativo, e a trilha de
   auditoria conta exatamente a mesma historia (`PkgWalletConcurrencyIT`, repetido 5 vezes por execucao);
 - o extrato e a auditoria nao podem ser alterados nem por SQL direto dos donos, e toda alteracao de saldo,
-  inclusive por SQL direto, aparece na trilha (`ImmutabilityAndAuditIT`).
+  inclusive por SQL direto, aparece na trilha (`ImmutabilityAndAuditIT`);
+- a mesma garantia vale de ponta a ponta pela API: 16 clientes HTTP de verdade contra o servidor real disparam 62
+  operacoes na mesma carteira (12 copias simultaneas da mesma `Idempotency-Key`, debitos alem do saldo), repetindo
+  com a mesma chave quando recebem 503. Exatamente uma copia e aplicada e as outras onze recebem o mesmo corpo;
+  cada resposta e igual ao lancamento gravado; saldo, extrato completo e trilha de auditoria contam a mesma
+  historia; e o retry tardio de um debito aplicado continua sendo replay mesmo com o saldo zerado
+  (`ApiConcurrencyIT`, 3 rodadas por execucao). Um teste a parte segura o lock da carteira por JDBC e mostra o
+  `503 WALLET_LOCKED` seguido do replay depois do commit.
+
+Para conferir que esses testes pegam os erros que prometem pegar, rodei o `ApiConcurrencyIT` contra duas versoes
+quebradas do package: sem o `FOR UPDATE` (perda de atualizacao: saldo final divergente nas 3 rodadas) e com o
+saldo verificado antes da chave de idempotencia (retry de debito respondendo 422: falha nas 3 rodadas).
+
+Rodar so os testes de concorrencia:
+
+```bash
+./mvnw verify -Dit.test='PkgWalletConcurrencyIT,ApiConcurrencyIT'
+```
