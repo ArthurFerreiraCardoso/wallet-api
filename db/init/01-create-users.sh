@@ -65,7 +65,7 @@ GRANT CREATE SESSION, CREATE TABLE, CREATE SEQUENCE, CREATE PROCEDURE, CREATE TR
 -- Dono do modelo: tabelas, sequences, package, triggers e views de leitura.
 GRANT CREATE SESSION, CREATE TABLE, CREATE SEQUENCE, CREATE PROCEDURE, CREATE TRIGGER, CREATE VIEW TO WALLET_OWNER;
 
--- Aplicacao: apenas sessao. Grants de objeto (EXECUTE no package, SELECT nas views) vem das migrations.
+-- Aplicacao: apenas sessao. Grants de objeto (EXECUTE no package, READ nas views) vem das migrations.
 GRANT CREATE SESSION TO WALLET_APP;
 
 EXIT

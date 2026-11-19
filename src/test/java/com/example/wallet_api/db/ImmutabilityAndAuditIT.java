@@ -27,7 +27,7 @@ import com.example.wallet_api.support.OracleTestDatabase;
 import com.example.wallet_api.support.PkgWalletCalls.RegisteredTransaction;
 
 /**
- * RN-11 (extrato imutavel, inclusive por SQL direto) e RN-12/RN-13 (trilha de auditoria alimentada pelo banco).
+ * Extrato imutavel (inclusive por SQL direto) e trilha de auditoria de saldo alimentada pelo banco, sem acesso da aplicacao.
  */
 class ImmutabilityAndAuditIT {
 

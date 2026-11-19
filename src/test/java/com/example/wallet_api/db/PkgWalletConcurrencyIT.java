@@ -28,7 +28,7 @@ import com.example.wallet_api.support.PkgWalletCalls.RegisteredTransaction;
 
 /**
  * Muitas sessoes disparando operacoes na mesma carteira ao mesmo tempo, direto no PKG_WALLET.
- * Prova RN-15 no banco: saldo nunca negativo, nada aplicado em dobro e saldo final igual a soma do que foi aplicado.
+ * Prova no banco: saldo nunca negativo, nada aplicado em dobro e saldo final igual a soma do que foi aplicado.
  */
 class PkgWalletConcurrencyIT {
 
