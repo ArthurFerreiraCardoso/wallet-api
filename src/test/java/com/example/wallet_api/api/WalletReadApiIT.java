@@ -20,7 +20,6 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -30,7 +29,6 @@ import com.example.wallet_api.support.PkgWalletCalls.RegisteredTransaction;
 /**
  * Leitura de ponta a ponta: dados gravados pelo PKG_WALLET, lidos pela API conectada como WALLET_APP.
  */
-@AutoConfigureMockMvc
 @WithMockUser
 class WalletReadApiIT extends OracleIntegrationTest {
 
