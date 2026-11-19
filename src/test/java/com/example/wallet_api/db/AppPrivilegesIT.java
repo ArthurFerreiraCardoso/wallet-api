@@ -50,7 +50,8 @@ class AppPrivilegesIT {
 
         assertThat(grants).containsExactlyInAnyOrder(
                 "WALLET_OWNER.V_WALLETS:READ",
-                "WALLET_OWNER.V_WALLET_TRANSACTIONS:READ");
+                "WALLET_OWNER.V_WALLET_TRANSACTIONS:READ",
+                "WALLET_OWNER.PKG_WALLET:EXECUTE");
     }
 
     @Test
@@ -96,6 +97,7 @@ class AppPrivilegesIT {
             "DELETE FROM wallet_audit.balance_audit                                                | 942",
             "SELECT wallet_audit.seq_balance_audit_id.NEXTVAL FROM dual                            | 942",
             "SELECT * FROM wallet_audit.flyway_schema_history                                      | 942",
+            "BEGIN wallet_owner.pkg_wallet_context.clear; END;                                     | 6550",
             "CREATE TABLE app_owned (id NUMBER)                                                    | 1031"
     })
     void cannotWriteOrReachAnythingElse(String sql, int oraCode) {
