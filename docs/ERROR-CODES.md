@@ -11,7 +11,7 @@ Cada codigo tem uma constante nomeada no package (`c_err_*`). A aplicacao le o c
 | -20003 | `c_err_invalid_type` | `INVALID_TRANSACTION_TYPE` | tipo diferente de `CREDIT` ou `DEBIT` | 422 |
 | -20004 | `c_err_insufficient_funds` | `INSUFFICIENT_FUNDS` | debito deixaria o saldo negativo | 422 |
 | -20005 | `c_err_idempotency_conflict` | `IDEMPOTENCY_KEY_CONFLICT` | chave ja usada na carteira para tipo ou valor diferente | 409 |
-| -20006 | `c_err_ledger_immutable` | `LEDGER_IMMUTABLE` | tentativa de alterar ou apagar lancamento do extrato (so acontece por SQL direto no banco) | 500 |
+| -20006 | `c_err_ledger_immutable` | `LEDGER_IMMUTABLE` | tentativa de alterar, apagar ou forjar lancamento, alterar a trilha de auditoria, trocar o id de uma carteira ou truncar essas tabelas (so acontece por SQL direto no banco; os triggers usam o literal) | 500 |
 | -20007 | `c_err_wallet_locked` | `WALLET_LOCKED` | outra operacao segurou o lock da carteira por mais de 5 segundos | 503 + `Retry-After` |
 | -20008 | `c_err_invalid_idempotency_key` | `INVALID_IDEMPOTENCY_KEY` | chave ausente ou fora de `[A-Za-z0-9_-]{1,64}` | 400 |
 | -20009 | `c_err_invalid_holder` | `INVALID_HOLDER` | nome do titular com mais de 120 caracteres | 422 |
