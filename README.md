@@ -157,6 +157,58 @@ com privilegios `ANY` passa direto. Nada disso se resolve com trigger. A mitigac
 migrations versionadas, a aplicacao nao tem DML nem DDL, e a trilha mora num schema separado, cujo dono nao
 consegue alterar as proprias linhas.
 
+## API
+
+> A autenticacao por API key e a documentacao OpenAPI entram nas proximas etapas; esta secao vai crescer junto.
+
+### Leitura
+
+| Metodo e rota | Descricao |
+|---|---|
+| `GET /wallets/{id}` | carteira com o saldo atual |
+| `GET /wallets/{id}/transactions` | extrato paginado, do lancamento mais recente para o mais antigo |
+
+Parametros do extrato:
+
+| Parametro | Padrao | Regra |
+|---|---|---|
+| `page` | `0` | `>= 0` |
+| `size` | `20` | de 1 a 100 |
+| `from` | (aberto) | ISO-8601 com fuso, inclusivo (ex.: `2026-11-19T00:00:00-03:00`; na URL, `+` vira `%2B`) |
+| `to` | (aberto) | ISO-8601 com fuso, exclusivo: o periodo e `[from, to)` |
+
+Exemplo de resposta do extrato:
+
+```json
+{
+  "content": [
+    { "id": 31, "walletId": 7, "type": "DEBIT", "amount": 20.00, "balanceAfter": 130.50,
+      "idempotencyKey": "pedido-123", "createdAt": "2026-11-19T13:00:00Z" }
+  ],
+  "page": 0, "size": 20, "totalElements": 41, "totalPages": 3
+}
+```
+
+Valores monetarios saem sempre com duas casas; datas em UTC, ISO-8601. Carteira inexistente devolve 404 tanto na
+consulta quanto no extrato (e nao uma pagina vazia).
+
+### Formato de erro
+
+Todo erro sai como `application/problem+json` (RFC 9457), com tres campos a mais: `code` (estavel, para o cliente
+tratar), `traceId` (o mesmo do header `X-Trace-Id` e dos logs) e `timestamp`.
+
+```json
+{
+  "type": "about:blank", "title": "Carteira nao encontrada", "status": 404,
+  "detail": "Carteira nao encontrada", "instance": "/wallets/99",
+  "code": "WALLET_NOT_FOUND", "traceId": "6f1c2a9e-...", "timestamp": "2026-11-19T13:00:00Z"
+}
+```
+
+A resposta nunca traz stack trace nem mensagem do banco. Erros nao previstos viram 500 com `code` `INTERNAL_ERROR`;
+o detalhe tecnico fica so no log, junto com o `traceId`. Se o cliente mandar um `X-Trace-Id` (8 a 64 caracteres
+entre letras, numeros e `-`), ele e reaproveitado, para correlacionar chamadas entre sistemas.
+
 ## Testes
 
 ```bash
