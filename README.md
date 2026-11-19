@@ -78,12 +78,60 @@ chave de idempotencia repetida na mesma carteira.
 | `WALLET_AUDIT_PASSWORD` | senha do `WALLET_AUDIT` |
 | `ORACLE_PORT` | porta local do Oracle (padrao 1521) |
 | `WALLET_DB_URL` | URL JDBC da aplicacao (padrao `jdbc:oracle:thin:@//localhost:1521/FREEPDB1`) |
+| `WALLET_API_KEY` | chave que os clientes mandam no header `X-API-Key` (minimo 16 caracteres; sem ela a aplicacao nao sobe) |
 
 Senhas: 8 a 30 caracteres, comecando com letra, apenas letras, numeros e `_`. Os valores do `.env.example`
 tem hifen de proposito: se nao forem trocados, o script de init recusa criar os usuarios.
 
-A aplicacao nao le o `.env` inteiro: ela recebe apenas `WALLET_APP_PASSWORD` e `WALLET_DB_URL` por variavel de
-ambiente, para que as senhas do owner, do audit e do SYS nunca cheguem ao processo dela.
+A aplicacao nao le o `.env` inteiro: ela recebe apenas `WALLET_APP_PASSWORD`, `WALLET_DB_URL` e `WALLET_API_KEY`
+por variavel de ambiente, para que as senhas do owner, do audit e do SYS nunca cheguem ao processo dela.
+
+## Rodando a aplicacao
+
+Com o banco no ar (`docker compose up -d`):
+
+```bash
+# Linux, macOS ou Git Bash
+export WALLET_APP_PASSWORD='<mesma senha do .env>'
+export WALLET_API_KEY="$(openssl rand -hex 24)"
+./mvnw spring-boot:run
+```
+
+```powershell
+# Windows PowerShell
+$env:WALLET_APP_PASSWORD = '<mesma senha do .env>'
+$env:WALLET_API_KEY = -join ((48..57) + (97..102) | Get-Random -Count 32 | ForEach-Object { [char]$_ })
+.\mvnw.cmd spring-boot:run
+```
+
+A aplicacao sobe em `http://localhost:8080`.
+
+- Swagger UI: <http://localhost:8080/swagger-ui.html> (clique em **Authorize** e informe a API key)
+- OpenAPI: <http://localhost:8080/v3/api-docs>
+- Health: <http://localhost:8080/actuator/health>
+
+Exemplo completo com `curl` (em Bash, com `WALLET_API_KEY` exportada como acima):
+
+```bash
+H="X-API-Key: $WALLET_API_KEY"
+
+curl -s -H "$H" -H 'Content-Type: application/json' -d '{"holderName":"Maria Silva"}' localhost:8080/wallets
+# {"id":1,"holderName":"Maria Silva","balance":0.00,...}
+
+curl -s -H "$H" -H 'Idempotency-Key: pedido-1' -H 'Content-Type: application/json' \
+     -d '{"type":"CREDIT","amount":100.00}' localhost:8080/wallets/1/transactions
+# 201 {"id":1,"walletId":1,"type":"CREDIT","amount":100.00,"balanceAfter":100.00,...}
+
+curl -s -i -H "$H" -H 'Idempotency-Key: pedido-1' -H 'Content-Type: application/json' \
+     -d '{"type":"CREDIT","amount":100.00}' localhost:8080/wallets/1/transactions
+# HTTP/1.1 200, Idempotent-Replayed: true, mesmo corpo da primeira chamada
+
+curl -s -H "$H" -H 'Idempotency-Key: pedido-2' -H 'Content-Type: application/json' \
+     -d '{"type":"DEBIT","amount":150.00}' localhost:8080/wallets/1/transactions
+# 422 {"code":"INSUFFICIENT_FUNDS",...}
+
+curl -s -H "$H" "localhost:8080/wallets/1/transactions?page=0&size=20"
+```
 
 ## Registro de operacoes: `PKG_WALLET`
 
@@ -159,7 +207,16 @@ consegue alterar as proprias linhas.
 
 ## API
 
-> A autenticacao por API key e a documentacao OpenAPI entram nas proximas etapas; esta secao vai crescer junto.
+Documentacao interativa no Swagger UI (`/swagger-ui.html`) e contrato em `/v3/api-docs`.
+
+### Autenticacao
+
+Toda rota de `/wallets` exige o header `X-API-Key` com a chave configurada em `WALLET_API_KEY`. Sem chave ou com
+chave errada, a resposta e `401` com `code` `UNAUTHORIZED` (a mensagem e a mesma nos dois casos). A comparacao e
+feita em tempo constante e a chave nunca e logada.
+
+A API e stateless: nao ha sessao nem cookie, por isso nao ha CSRF. Ficam abertos sem chave apenas
+`/actuator/health` (sem detalhes) e a documentacao OpenAPI, que descreve o contrato e nao expoe dados.
 
 ### Leitura
 
@@ -239,9 +296,9 @@ tratar), `traceId` (o mesmo do header `X-Trace-Id` e dos logs) e `timestamp`.
 
 ```json
 {
-  "type": "about:blank", "title": "Carteira nao encontrada", "status": 404,
+  "title": "Carteira nao encontrada", "status": 404,
   "detail": "Carteira nao encontrada", "instance": "/wallets/99",
-  "code": "WALLET_NOT_FOUND", "traceId": "6f1c2a9e-...", "timestamp": "2026-11-19T13:00:00Z"
+  "code": "WALLET_NOT_FOUND", "traceId": "6f1c2a9e-0b7d-4c55-9a51-2f0c1e8d4b3a", "timestamp": "2026-11-19T13:00:00.123456Z"
 }
 ```
 
