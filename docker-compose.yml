@@ -41,5 +41,34 @@ services:
         flyway -locations=filesystem:/flyway/migrations/owner migrate
     restart: "no"
 
+  # A API. So sobe depois do banco saudavel e das migrations aplicadas. Recebe apenas as proprias variaveis:
+  # as senhas do owner, do audit e do SYS nao chegam a este container.
+  app:
+    build: .
+    image: wallet-api:local
+    depends_on:
+      oracle:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      WALLET_DB_URL: jdbc:oracle:thin:@//oracle:1521/FREEPDB1
+      WALLET_APP_PASSWORD: ${WALLET_APP_PASSWORD:?defina WALLET_APP_PASSWORD no .env}
+      WALLET_API_KEY: ${WALLET_API_KEY:?defina WALLET_API_KEY no .env}
+      # Logs em JSON (formato ECS) dentro do container, prontos para um coletor de logs.
+      LOGGING_STRUCTURED_FORMAT_CONSOLE: ecs
+    ports:
+      - "127.0.0.1:${APP_PORT:-8080}:8080"
+    # Container endurecido: sistema de arquivos so leitura (so /tmp gravavel, usado pelo Tomcat),
+    # nenhuma capability do Linux e sem escalada de privilegio.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
+
 volumes:
   oracle-data:

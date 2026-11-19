@@ -27,7 +27,8 @@ Sumario:
 19. [Arquitetura do codigo Java](#19-arquitetura-do-codigo-java)
 20. [Estrategia de testes](#20-estrategia-de-testes)
 21. [Ambiente Docker e portabilidade](#21-ambiente-docker)
-22. [Limitacoes conhecidas, em um lugar so](#22-limitacoes-conhecidas)
+22. [Imagem da aplicacao e observabilidade](#22-imagem-da-aplicacao-e-observabilidade)
+23. [Limitacoes conhecidas, em um lugar so](#23-limitacoes-conhecidas)
 
 ---
 
@@ -482,9 +483,45 @@ que rode os testes de concorrencia varias vezes seguidas para medir instabilidad
 sessoes do Oracle Free (`ORA-12516`) so no CI, por causa da ordem dos testes. Todos os testes de integracao passaram a
 compartilhar um contexto, com pool de 4 conexoes.
 
-**Com mais tempo.** Dockerfile da aplicacao e um servico `app` no compose, imagens fixadas por digest.
+**Com mais tempo.** Imagens fixadas por digest, alem da tag.
 
-## 22. Limitacoes conhecidas
+## 22. Imagem da aplicacao e observabilidade
+
+**Decisao.**
+- `Dockerfile` em duas etapas: a primeira compila com JDK e Maven Wrapper (dependencias numa camada propria, para o
+  cache do Docker), a segunda leva so a JRE e o jar. Imagens base com tag fixa, usuario sem root (UID 10001), heap em 75% da
+  memoria do container e `HEALTHCHECK` no `/actuator/health`.
+- `.dockerignore` em forma de lista do que entra (pom, wrapper, `src/main`), e nao do que sai: nada alem do necessario
+  chega ao contexto do build.
+- Servico `app` no compose, que so sobe depois do banco saudavel e do `migrate` concluido com sucesso. Recebe apenas a
+  propria senha, a API key e a URL do banco. Container endurecido: sistema de arquivos so leitura (so `/tmp` gravavel),
+  sem capabilities do Linux e sem escalada de privilegio.
+- Observabilidade: health (aberto), metricas do Actuator (com API key), um contador de negocio `wallet.transactions`
+  por resultado e logs em JSON (ECS) no container, com o `traceId` de cada requisicao.
+
+**Por que.** Com a aplicacao no compose, quem avalia sobe tudo com um comando. A imagem final sem JDK, Maven e codigo
+fonte e menor e expoe menos. O contador responde perguntas que a latencia do Spring nao responde: quantas operacoes
+foram aplicadas, quantas eram replay e quantas foram recusadas por saldo ou por conflito de chave.
+
+**Detalhes que apareceram ao construir.**
+- Sem `unzip` na imagem de build, o Maven Wrapper baixa o `.tar.gz` do Maven, e o checksum configurado (do `.zip`)
+  nao confere. A etapa de build instala o `unzip` em vez de remover a verificacao de integridade.
+- O `maven-wrapper.properties` passou a ter LF forcado pelo `.gitattributes`: ele e lido dentro do container Linux.
+- O tipo da operacao vem do cliente; so `CREDIT` e `DEBIT` viram tag da metrica (o resto vira `other`), para um valor
+  estranho nao criar uma serie nova.
+
+**Alternativas descartadas.**
+- Imagem nativa (GraalVM) ou jlink: imagem menor e partida mais rapida, mas build bem mais lento e mais complexo de
+  manter para este caso.
+- Endpoint Prometheus e tracing distribuido (OpenTelemetry): uteis com um coletor de verdade, que este ambiente nao tem.
+
+**Com mais tempo.** Imagens base fixadas por digest e atualizadas por bot; scan de vulnerabilidades da imagem no CI
+(Trivy); imagem final distroless, sem shell nem curl; senhas como secret do orquestrador em vez de variavel de ambiente
+(hoje aparecem no `docker inspect`); endpoint Prometheus com um painel; tracing com OpenTelemetry propagando o
+`traceId`; e a imagem
+publicada num registry pelo CI (hoje o CI so constroi para validar o `Dockerfile`).
+
+## 23. Limitacoes conhecidas
 
 Reunidas aqui para quem quer saber onde o desenho para:
 

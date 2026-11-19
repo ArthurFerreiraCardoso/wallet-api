@@ -3,3 +3,6 @@
 *.sh text eol=lf
 *.sql text eol=lf
 *.cmd text eol=crlf
+# Lidos dentro de containers Linux: com CRLF, o checksum do Maven Wrapper falha no build da imagem.
+/.mvn/wrapper/maven-wrapper.properties text eol=lf
+Dockerfile text eol=lf

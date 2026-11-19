@@ -7,15 +7,19 @@ PL/SQL, triggers e sequences. A aplicacao Spring Boot e a camada de API sobre el
 ## Inicio rapido
 
 ```bash
-cp .env.example .env          # troque as senhas dos usuarios WALLET_* (os placeholders sao recusados de proposito)
-docker compose up -d          # sobe o Oracle e aplica as migrations; aguarde oracle "healthy" e migrate "Exited (0)"
-./mvnw verify                 # testes unitarios + integracao (sobem um Oracle proprio via Testcontainers)
+cp .env.example .env          # troque as senhas dos usuarios WALLET_* e a WALLET_API_KEY (placeholders sao recusados)
+docker compose up -d --build  # sobe Oracle, migrations e a API em http://localhost:8080
+docker compose ps -a          # oracle "healthy", migrate "Exited (0)", app "healthy"
 ```
 
-Os testes nao dependem do compose: eles sobem o proprio Oracle. Com os dois no ar ao mesmo tempo, a maquina precisa
-de memoria para dois bancos; se faltar, rode `docker compose down` antes do `./mvnw verify`.
+Testes (nao dependem do compose: sobem o proprio Oracle via Testcontainers):
 
-Para rodar a aplicacao e chamar a API, veja [Rodando a aplicacao](#rodando-a-aplicacao).
+```bash
+./mvnw verify
+```
+
+Com o compose e os testes no ar ao mesmo tempo, a maquina precisa de memoria para dois bancos; se faltar, rode
+`docker compose down` antes do `./mvnw verify`. Para chamar a API, veja [Rodando a aplicacao](#rodando-a-aplicacao).
 
 ## Mapa da documentacao
 
@@ -115,19 +119,29 @@ chave de idempotencia repetida na mesma carteira.
 | `ORACLE_PORT` | porta local do Oracle (padrao 1521) |
 | `WALLET_DB_URL` | URL JDBC da aplicacao (padrao `jdbc:oracle:thin:@//localhost:1521/FREEPDB1`) |
 | `WALLET_API_KEY` | chave que os clientes mandam no header `X-API-Key` (minimo 16 caracteres; sem ela a aplicacao nao sobe) |
+| `APP_PORT` | porta local da API no compose (padrao 8080) |
 
 Senhas dos usuarios `WALLET_*`: 8 a 30 caracteres, comecando com letra, apenas letras, numeros e `_`. Os valores do
 `.env.example` tem hifen de proposito: se nao forem trocados, o script de init recusa criar os usuarios. A
 `ORACLE_PASSWORD` (SYS) e validada pela propria imagem do Oracle; troque-a tambem.
 
-**Quem le o `.env`:** so o `docker compose`. A aplicacao **nao** le o arquivo; ela recebe `WALLET_APP_PASSWORD`,
-`WALLET_DB_URL` e `WALLET_API_KEY` por variavel de ambiente do shell (veja [Rodando a aplicacao](#rodando-a-aplicacao)).
-Assim as senhas do owner, do audit e do SYS nunca chegam ao processo dela. `WALLET_DB_URL` e `WALLET_API_KEY` estao no
-`.env.example` so como referencia.
+**Quem le o `.env`:** so o `docker compose`, que repassa a cada container apenas o que ele precisa. O container da
+aplicacao recebe `WALLET_APP_PASSWORD` e `WALLET_API_KEY` (e a URL do banco ja apontando para o servico `oracle`); as
+senhas do owner, do audit e do SYS nunca chegam a ele. A aplicacao em si nao le o arquivo: rodando fora do Docker, as
+variaveis vem do shell.
 
 ## Rodando a aplicacao
 
-Com o banco no ar (`docker compose up -d`):
+### Pelo Docker (recomendado)
+
+`docker compose up -d --build` ja sobe a API em `http://localhost:8080` (porta configuravel em `APP_PORT`), depois do
+banco saudavel e das migrations aplicadas. A imagem e construida pelo `Dockerfile` em duas etapas (compila com JDK e
+Maven; a imagem final leva so a JRE e o jar) e roda sem root. Exporte a mesma chave do `.env` para usar nos exemplos
+abaixo: `export WALLET_API_KEY='<valor do .env>'`.
+
+### Fora do Docker
+
+Com o banco no ar e o servico `app` parado (`docker compose up -d oracle migrate`):
 
 ```bash
 # Linux, macOS ou Git Bash
@@ -347,6 +361,24 @@ A resposta nunca traz stack trace nem mensagem do banco. Erros nao previstos vir
 o detalhe tecnico fica so no log, junto com o `traceId`. Se o cliente mandar um `X-Trace-Id` (8 a 64 caracteres
 entre letras, numeros e `-`), ele e reaproveitado, para correlacionar chamadas entre sistemas.
 
+## Observabilidade
+
+| O que | Onde | Acesso |
+|---|---|---|
+| Saude (banco incluso) | `GET /actuator/health` | aberto, sem detalhes; usado tambem pelo `HEALTHCHECK` do container |
+| Metricas | `GET /actuator/metrics` | com API key |
+| Contador de operacoes | `GET /actuator/metrics/wallet.transactions?tag=outcome:applied` | com API key |
+| Latencia por endpoint | `GET /actuator/metrics/http.server.requests` (medido pelo proprio Spring) | com API key |
+| Logs | saida padrao do container | `docker compose logs app` |
+
+- `wallet.transactions` conta cada registro de operacao pelo resultado: `outcome` = `applied`, `replayed` ou o codigo
+  do erro (`INSUFFICIENT_FUNDS`, `IDEMPOTENCY_KEY_CONFLICT`...), e `type` = `CREDIT`, `DEBIT` ou `other`. O tipo vem do
+  cliente; para nao criar uma serie nova a cada valor estranho, so `CREDIT` e `DEBIT` viram tag.
+- Dentro do container, os logs saem em JSON (formato ECS), um evento por linha, com o `traceId` de cada requisicao: da
+  para filtrar todos os logs de uma chamada pelo mesmo valor devolvido no header `X-Trace-Id`. Rodando fora do Docker,
+  os logs ficam no formato de texto padrao, com o `traceId` entre colchetes.
+- Nenhum log traz senha, API key ou corpo de requisicao.
+
 ## Testes
 
 ```bash
@@ -399,7 +431,8 @@ src/main/java/.../domain/           modelo, catalogo de erros e portas
 src/main/java/.../infrastructure/   adaptadores Oracle (package, views) e tradutor de erros
 src/test/java/.../db/               testes do banco: privilegios, constraints, package, triggers, concorrencia
 src/test/java/.../api/              testes da API: contrato, seguranca, leitura, escrita, concorrencia via HTTP
-docker-compose.yml         Oracle Free + servico de migrations
+docker-compose.yml         Oracle Free + servico de migrations + API
+Dockerfile                 imagem da API (build em duas etapas, sem root)
 .env.example               variaveis de ambiente (copie para .env)
 ```
 
@@ -413,5 +446,6 @@ docker-compose.yml         Oracle Free + servico de migrations
 | `migrate` termina com erro | Veja `docker compose logs migrate`. Se o banco foi recriado com outras senhas, o `.env` e o volume precisam estar alinhados (`down -v`). |
 | `port is already allocated` na porta 1521 | Outro Oracle local. Mude `ORACLE_PORT` no `.env` e exporte `WALLET_DB_URL` com a mesma porta antes de rodar a aplicacao (ela nao le o `.env`). |
 | `bad interpreter` ou `\r: command not found` no init (Windows) | O script foi salvo com CRLF. O `.gitattributes` forca LF em `*.sh`; se o arquivo foi editado ou copiado por fora do git, converta para LF ou clone o repositorio de novo. |
-| Aplicacao nao sobe: `apiKey` invalida | `WALLET_API_KEY` ausente, com menos de 16 caracteres ou com o placeholder. Gere uma: `openssl rand -hex 24`. |
+| Aplicacao nao sobe: `apiKey` invalida | `WALLET_API_KEY` ausente, com menos de 16 caracteres ou com o placeholder. Gere uma: `openssl rand -hex 24` (no compose, troque no `.env` e rode `docker compose up -d app`). |
+| Servico `app` nao fica `healthy` | Veja `docker compose logs app`. A API so sobe depois de `oracle` saudavel e `migrate` com codigo 0; se o `migrate` falhou, o `app` nao inicia. |
 | `./mvnw verify` falha nos testes de integracao com erro de Docker | O Docker precisa estar rodando; os testes sobem o proprio Oracle (a primeira execucao baixa a imagem, cerca de 1,3 GB). |
