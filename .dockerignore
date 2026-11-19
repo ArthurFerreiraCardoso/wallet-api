@@ -1,0 +1,6 @@
+# Lista do que entra no build, e nao do que fica de fora: nada alem do necessario chega a imagem.
+*
+!pom.xml
+!mvnw
+!.mvn/wrapper/maven-wrapper.properties
+!src/main/**
