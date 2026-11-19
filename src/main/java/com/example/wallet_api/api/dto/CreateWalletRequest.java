@@ -1,10 +1,10 @@
 package com.example.wallet_api.api.dto;
 
-import jakarta.validation.constraints.Size;
+import io.swagger.v3.oas.annotations.media.Schema;
 
-/**
- * Corpo opcional de POST /wallets. O limite real do titular (120) e do banco (-20009, 422); o {@code @Size}
- * daqui so barra entrada absurda antes de ela chegar ao driver.
- */
-public record CreateWalletRequest(@Size(max = 1000) String holderName) {
+/** Corpo opcional de POST /wallets. O limite do titular (120) e validado pelo banco (-20009, 422). */
+public record CreateWalletRequest(
+        @Schema(description = "Titular, opcional; so espacos conta como ausente", maxLength = 120, nullable = true,
+                example = "Maria Silva")
+        String holderName) {
 }
