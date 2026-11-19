@@ -20,6 +20,7 @@ record ErrorMapping(HttpStatus status, String title, boolean exposeDetail) {
     static final String NOT_ACCEPTABLE = "NOT_ACCEPTABLE";
     static final String UNSUPPORTED_MEDIA_TYPE = "UNSUPPORTED_MEDIA_TYPE";
     static final String REQUEST_ERROR = "REQUEST_ERROR";
+    static final String SERVICE_BUSY = "SERVICE_BUSY";
 
     /** Switch sem default: um ErrorCode novo sem mapeamento nao compila. */
     static ErrorMapping of(ErrorCode code) {

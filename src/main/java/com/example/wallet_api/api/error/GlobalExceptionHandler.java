@@ -1,6 +1,8 @@
 package com.example.wallet_api.api.error;
 
 import java.time.Instant;
+import java.util.List;
+import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -9,6 +11,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.CannotGetJdbcConnectionException;
+import org.springframework.transaction.CannotCreateTransactionException;
+import org.springframework.validation.FieldError;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -18,6 +24,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
 import com.example.wallet_api.api.web.TraceIdFilter;
+import com.example.wallet_api.domain.ErrorCode;
 import com.example.wallet_api.domain.WalletException;
 
 /**
@@ -32,16 +39,42 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     private static final String INTERNAL_DETAIL = "Erro interno. Informe o traceId ao suporte.";
 
+    /** Contencao passageira: o cliente pode repetir a mesma requisicao (com a mesma chave) depois deste intervalo. */
+    private static final String RETRY_AFTER_SECONDS = "1";
+
     @ExceptionHandler(WalletException.class)
     ResponseEntity<ProblemDetail> handleWalletException(WalletException ex) {
-        ErrorMapping mapping = ErrorMapping.of(ex.code());
+        return walletError(ex.code(), ex.getMessage(), ex);
+    }
+
+    /**
+     * Pool de conexoes esgotado (por exemplo, varias requisicoes esperando o lock de uma carteira disputada):
+     * e contencao, nao falha interna.
+     */
+    @ExceptionHandler({ CannotCreateTransactionException.class, CannotGetJdbcConnectionException.class })
+    ResponseEntity<ProblemDetail> handleNoConnection(Exception ex) {
+        log.warn("Sem conexao disponivel no pool: {}", ex.getMessage());
+        ProblemDetail body = ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE,
+                "Servico ocupado; tente novamente em instantes");
+        body.setTitle("Servico ocupado");
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).header(HttpHeaders.RETRY_AFTER, RETRY_AFTER_SECONDS)
+                .body(enrich(body, ErrorMapping.SERVICE_BUSY));
+    }
+
+    private ResponseEntity<ProblemDetail> walletError(ErrorCode code, String message, Exception cause) {
+        ErrorMapping mapping = ErrorMapping.of(code);
         if (!mapping.exposeDetail()) {
-            log.error("Erro de negocio que nao deveria chegar pela API: {}", ex.code(), ex);
+            log.error("Erro de negocio que nao deveria chegar pela API: {}", code, cause);
+        } else if (code == ErrorCode.WALLET_LOCKED) {
+            log.info("Carteira ocupada; cliente orientado a repetir");
         }
-        ProblemDetail body = ProblemDetail.forStatusAndDetail(mapping.status(),
-                mapping.exposeDetail() ? ex.getMessage() : INTERNAL_DETAIL);
+        ProblemDetail body = ProblemDetail.forStatusAndDetail(mapping.status(), mapping.exposeDetail() ? message : INTERNAL_DETAIL);
         body.setTitle(mapping.title());
-        return ResponseEntity.status(mapping.status()).body(enrich(body, ex.code().name()));
+        ResponseEntity.BodyBuilder response = ResponseEntity.status(mapping.status());
+        if (mapping.status() == HttpStatus.SERVICE_UNAVAILABLE) {
+            response.header(HttpHeaders.RETRY_AFTER, RETRY_AFTER_SECONDS);
+        }
+        return response.body(enrich(body, code.name()));
     }
 
     @ExceptionHandler(Exception.class)
@@ -63,6 +96,46 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         ProblemDetail problem = body instanceof ProblemDetail pd ? pd : ProblemDetail.forStatus(statusCode);
         problem.setDetail(frameworkDetail(ex, statusCode));
         return super.handleExceptionInternal(ex, enrich(problem, frameworkCode(statusCode)), headers, statusCode, request);
+    }
+
+    /**
+     * Campo obrigatorio ausente: 400 VALIDATION_ERROR com a lista de campos.
+     * As demais anotacoes dos DTOs sao so barreiras contra entrada absurda; quando uma delas dispara, a resposta e
+     * a mesma que o banco daria para aquela regra (ex.: amount com 11 casas -> 422 INVALID_AMOUNT, igual a 10.005).
+     */
+    @Override
+    protected ResponseEntity<Object> handleMethodArgumentNotValid(MethodArgumentNotValidException ex, HttpHeaders headers,
+                                                                  HttpStatusCode status, WebRequest request) {
+        List<FieldError> fieldErrors = ex.getBindingResult().getFieldErrors();
+        boolean missingField = fieldErrors.stream().anyMatch(GlobalExceptionHandler::isPresenceError);
+        if (!missingField && !fieldErrors.isEmpty()) {
+            ErrorCode code = businessCodeFor(fieldErrors.getFirst().getField());
+            if (code != null) {
+                ResponseEntity<ProblemDetail> response = walletError(code, code.defaultMessage(), ex);
+                return ResponseEntity.status(response.getStatusCode()).headers(response.getHeaders()).body(response.getBody());
+            }
+        }
+        List<Map<String, String>> errors = fieldErrors.stream()
+                .map(error -> Map.of("field", error.getField(), "message", isPresenceError(error) ? "obrigatorio" : "invalido"))
+                .toList();
+        ProblemDetail body = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "Campos obrigatorios ausentes ou invalidos");
+        body.setTitle(ErrorMapping.of(ErrorCode.VALIDATION_ERROR).title());
+        body.setProperty("errors", errors);
+        return ResponseEntity.badRequest().body(enrich(body, ErrorCode.VALIDATION_ERROR.name()));
+    }
+
+    /** Mensagem fixa na lista de erros: a padrao do Bean Validation varia com o idioma da JVM. */
+    private static boolean isPresenceError(FieldError error) {
+        return "NotNull".equals(error.getCode()) || "NotBlank".equals(error.getCode());
+    }
+
+    private static ErrorCode businessCodeFor(String field) {
+        return switch (field) {
+            case "amount" -> ErrorCode.INVALID_AMOUNT;
+            case "type" -> ErrorCode.INVALID_TRANSACTION_TYPE;
+            case "holderName" -> ErrorCode.INVALID_HOLDER;
+            default -> null;
+        };
     }
 
     private static ProblemDetail enrich(ProblemDetail problem, String code) {
